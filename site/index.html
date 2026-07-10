@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NYT Game Solvers</title>
+<style>
+  :root { --bg:#fafafa; --surface:#fff; --text:#121212; --muted:#6b6b6b; --border:#dcdcdc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161616; --surface:#222; --text:#f0f0f0; --muted:#9a9a9a; --border:#3a3a3a; }
+  }
+  body { font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text);
+         min-height:100vh; margin:0; padding:40px 16px; }
+  .wrap { max-width:640px; margin:0 auto; text-align:center; }
+  h1 { letter-spacing:.5px; }
+  .tagline { color:var(--muted); margin-top:4px; }
+  .games { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); margin-top:28px; }
+  a.card { display:block; background:var(--surface); border:1px solid var(--border); border-radius:12px;
+           padding:28px 20px; text-decoration:none; color:inherit; transition:transform .1s, box-shadow .1s; }
+  a.card:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,.12); }
+  .card .emoji { font-size:2.2rem; }
+  .card h2 { margin:10px 0 6px; font-size:1.1rem; }
+  .card p { color:var(--muted); font-size:.85rem; margin:0; line-height:1.45; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎮 NYT Game Solvers</h1>
+  <p class="tagline">Pick a puzzle to work on.</p>
+  <div class="games">
+    <a class="card" href="wordle-solver.html">
+      <div class="emoji">🟩</div>
+      <h2>Wordle Solver</h2>
+      <p>Ranked next-guess suggestions from your board.</p>
+    </a>
+    <a class="card" href="connections-solver.html">
+      <div class="emoji">🟪</div>
+      <h2>Connections Solver</h2>
+      <p>A workspace for grouping the 16 words, with optional AI assist.</p>
+    </a>
+  </div>
+</div>
+</body>
+</html>
