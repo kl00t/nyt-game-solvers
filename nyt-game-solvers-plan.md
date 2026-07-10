@@ -93,7 +93,7 @@ nyt-game-solvers/
 
 This step has been completed (the `lambda/` folder created for the earlier authenticated design is no longer needed and has been removed).
 
-**Branch protection:** after Step 5 lands, add a rule on `main` (GitHub → Settings → Branches): require a pull request and require the "Validate" status check.
+**Branch protection:** not used — enforced branch protection isn't available on this repository's GitHub plan. Work via pull requests by convention: the Validate workflow still runs on every PR and shows a pass/fail status, it just can't hard-block the merge. Anything pushed or merged to `main` deploys to production.
 
 ---
 
@@ -490,7 +490,7 @@ No cache invalidation step is needed — with no CDN in front, S3 serves the new
 - [ ] **Both solvers work** — tiles, keyboard input, localStorage persistence, and (optionally) the Connections AI assist.
 - [ ] **Default document** — visiting the bare URL (no `/index.html`) serves the landing page.
 - [ ] **State bucket is private** — `https://nyt-game-solvers-tfstate-<account-id>.s3.eu-west-1.amazonaws.com/prod/terraform.tfstate` returns `403 Access Denied`.
-- [ ] **CI gate** — open a PR with a trivial change: the Validate workflow runs `fmt`/`validate`/`plan` and blocks merging until green (once branch protection is on).
+- [ ] **CI check** — open a PR with a trivial change: the Validate workflow runs `fmt`/`validate`/`plan` and reports its status on the PR (advisory only — no branch protection on this plan, so check it's green before merging).
 - [ ] **CD** — merge the PR: the Deploy workflow applies and syncs; the change is live at the URL as soon as the workflow finishes.
 - [ ] **No secrets in GitHub** — repo Settings → Secrets shows no AWS keys (OIDC only).
 
