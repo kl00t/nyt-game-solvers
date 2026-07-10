@@ -508,6 +508,5 @@ No cache invalidation step is needed — with no CDN in front, S3 serves the new
 
 - **HTTPS + caching** — put CloudFront (with Origin Access Control and the free default certificate) in front of the bucket. This is the first thing to add if the site gets real traffic or you want the padlock. The bucket can then be made private again.
 - **Custom domain** — Route 53 + free ACM certificate (requires the CloudFront enhancement; certs for CloudFront live in us-east-1).
-- **AWS Budget alarm** — e.g. alert at £5/month as a cost tripwire.
+- **AWS Budget alarm** — ✅ done (2026-07): implemented account-wide ($10/month tripwire) in `aws-infrastructure/bootstrap`.
 - **Re-adding a login later** — the previous revision of this plan (in git history) documents the full CloudFront + Lambda@Edge + Cognito architecture.
-- **Staging environment** — second Terraform state key + a `develop` branch workflow.
