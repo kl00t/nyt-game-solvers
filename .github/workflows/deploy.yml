@@ -22,6 +22,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # Branch protection can't be enforced on a private repo on the free
+      # plan, so guard here: PR merge commits have committer "GitHub"; a
+      # direct push to main does not — fail loudly instead of deploying
+      # unreviewed content. (Accident-net, not tamper-proof.)
+      - name: Require PR merge commit
+        if: github.event.head_commit.committer.name != 'GitHub'
+        run: |
+          echo "::error::Direct push to main detected — refusing to deploy. Open a PR and merge it."
+          exit 1
+
       - uses: actions/checkout@v4
 
       - uses: aws-actions/configure-aws-credentials@v4
