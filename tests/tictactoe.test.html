@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tic Tac Toe — Tests</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', monospace; background: #1a1a2e; color: #eee; padding: 32px; }
+    h1 { color: #e94560; margin-bottom: 24px; font-size: 1.4rem; letter-spacing: 1px; }
+    .suite { margin-bottom: 24px; }
+    .suite-name { color: #a8dadc; font-size: 1rem; margin-bottom: 8px; font-weight: bold; }
+    .result { padding: 6px 12px; margin: 4px 0; border-radius: 6px; font-size: 0.9rem; }
+    .pass { background: #0d3b2e; color: #4caf87; }
+    .fail { background: #3b0d0d; color: #e94560; }
+    .summary { margin-top: 24px; font-size: 1.1rem; border-top: 1px solid #333; padding-top: 16px; }
+    .summary.all-pass { color: #4caf87; }
+    .summary.some-fail { color: #e94560; }
+  </style>
+</head>
+<body>
+  <h1>Tic Tac Toe — Test Suite</h1>
+  <div id="output"></div>
+
+  <script>
+    // ── Game logic under test ──────────────────────────────────────────────────
+    const WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+    function checkWin(board) {
+      for (const [a, b, c] of WINS) {
+        if (board[a] && board[a] === board[b] && board[a] === board[c]) return [a, b, c];
+      }
+      return null;
+    }
+
+    function makeBoard(...moves) {
+      // moves: ['X',0], ['O',4], ...  applies in order and returns {board, current, over}
+      let board = Array(9).fill(null);
+      let current = 'X';
+      let over = false;
+      for (const [player, idx] of moves) {
+        if (over || board[idx]) continue;
+        board[idx] = player;
+        if (checkWin(board)) { over = true; break; }
+        if (board.every(Boolean)) { over = true; break; }
+        current = current === 'X' ? 'O' : 'X';
+      }
+      return { board, current, over };
+    }
+
+    // ── Tiny test runner ───────────────────────────────────────────────────────
+    let passed = 0, failed = 0;
+    const output = document.getElementById('output');
+    let currentSuite = null;
+
+    function suite(name) {
+      currentSuite = document.createElement('div');
+      currentSuite.className = 'suite';
+      const label = document.createElement('div');
+      label.className = 'suite-name';
+      label.textContent = name;
+      currentSuite.appendChild(label);
+      output.appendChild(currentSuite);
+    }
+
+    function test(name, fn) {
+      try {
+        fn();
+        const el = document.createElement('div');
+        el.className = 'result pass';
+        el.textContent = `✓ ${name}`;
+        currentSuite.appendChild(el);
+        passed++;
+      } catch (e) {
+        const el = document.createElement('div');
+        el.className = 'result fail';
+        el.textContent = `✗ ${name} — ${e.message}`;
+        currentSuite.appendChild(el);
+        failed++;
+      }
+    }
+
+    function assert(condition, msg) {
+      if (!condition) throw new Error(msg || 'assertion failed');
+    }
+
+    function assertEqual(a, b) {
+      if (JSON.stringify(a) !== JSON.stringify(b))
+        throw new Error(`expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+    }
+
+    // ── Tests ──────────────────────────────────────────────────────────────────
+
+    suite('checkWin — no winner');
+
+    test('empty board returns null', () => {
+      assertEqual(checkWin(Array(9).fill(null)), null);
+    });
+
+    test('partial board with no winner returns null', () => {
+      const b = [null,null,null, null,null,null, null,null,null];
+      b[0] = 'X'; b[4] = 'O'; b[1] = 'X'; b[3] = 'O';
+      assertEqual(checkWin(b), null);
+    });
+
+    suite('checkWin — rows');
+
+    test('X wins top row (0,1,2)', () => {
+      const b = Array(9).fill(null);
+      b[0] = b[1] = b[2] = 'X';
+      assertEqual(checkWin(b), [0, 1, 2]);
+    });
+
+    test('O wins middle row (3,4,5)', () => {
+      const b = Array(9).fill(null);
+      b[3] = b[4] = b[5] = 'O';
+      assertEqual(checkWin(b), [3, 4, 5]);
+    });
+
+    test('X wins bottom row (6,7,8)', () => {
+      const b = Array(9).fill(null);
+      b[6] = b[7] = b[8] = 'X';
+      assertEqual(checkWin(b), [6, 7, 8]);
+    });
+
+    suite('checkWin — columns');
+
+    test('X wins left column (0,3,6)', () => {
+      const b = Array(9).fill(null);
+      b[0] = b[3] = b[6] = 'X';
+      assertEqual(checkWin(b), [0, 3, 6]);
+    });
+
+    test('O wins middle column (1,4,7)', () => {
+      const b = Array(9).fill(null);
+      b[1] = b[4] = b[7] = 'O';
+      assertEqual(checkWin(b), [1, 4, 7]);
+    });
+
+    test('X wins right column (2,5,8)', () => {
+      const b = Array(9).fill(null);
+      b[2] = b[5] = b[8] = 'X';
+      assertEqual(checkWin(b), [2, 5, 8]);
+    });
+
+    suite('checkWin — diagonals');
+
+    test('X wins top-left to bottom-right (0,4,8)', () => {
+      const b = Array(9).fill(null);
+      b[0] = b[4] = b[8] = 'X';
+      assertEqual(checkWin(b), [0, 4, 8]);
+    });
+
+    test('O wins top-right to bottom-left (2,4,6)', () => {
+      const b = Array(9).fill(null);
+      b[2] = b[4] = b[6] = 'O';
+      assertEqual(checkWin(b), [2, 4, 6]);
+    });
+
+    suite('Turn management');
+
+    test('starts on X', () => {
+      const { current } = makeBoard();
+      assertEqual(current, 'X');
+    });
+
+    test('switches to O after X moves', () => {
+      const { current } = makeBoard(['X', 0]);
+      assertEqual(current, 'O');
+    });
+
+    test('switches back to X after O moves', () => {
+      const { current } = makeBoard(['X', 0], ['O', 1]);
+      assertEqual(current, 'X');
+    });
+
+    suite('Game over — win');
+
+    test('game ends when X wins', () => {
+      const { over } = makeBoard(
+        ['X',0], ['O',3],
+        ['X',1], ['O',4],
+        ['X',2]
+      );
+      assert(over, 'game should be over');
+    });
+
+    test('game ends when O wins', () => {
+      const { over } = makeBoard(
+        ['X',0], ['O',2],
+        ['X',1], ['O',4],
+        ['X',8], ['O',6]
+      );
+      assert(over, 'game should be over');
+    });
+
+    suite('Game over — draw');
+
+    test('draw when board is full with no winner', () => {
+      // X O X / O O X / X X O — no winner
+      const { board, over } = makeBoard(
+        ['X',0], ['O',1], ['X',2],
+        ['O',3], ['X',5], ['O',4],  // intentionally fill to force draw pattern
+        ['X',6], ['O',8], ['X',7]
+      );
+      assert(board.every(Boolean), 'board should be full');
+      assert(over, 'game should be over');
+    });
+
+    suite('Board integrity');
+
+    test('ignores moves on already-taken cells', () => {
+      const { board } = makeBoard(['X', 4], ['O', 4]);
+      assertEqual(board[4], 'X'); // O's attempt on cell 4 is ignored
+    });
+
+    test('board has exactly 9 cells', () => {
+      const { board } = makeBoard(['X', 0]);
+      assertEqual(board.length, 9);
+    });
+
+    // ── Summary ────────────────────────────────────────────────────────────────
+    const summary = document.createElement('div');
+    summary.className = `summary ${failed === 0 ? 'all-pass' : 'some-fail'}`;
+    summary.textContent = `${passed + failed} tests — ${passed} passed, ${failed} failed`;
+    output.appendChild(summary);
+  </script>
+</body>
+</html>
