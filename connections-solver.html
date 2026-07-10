@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connections Solver</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --text: #121212;
+    --text-muted: #6b6b6b;
+    --border: #dcdcdc;
+    --tile-bg: #efefe6;
+    --tile-selected-bg: #5a594e;
+    --tile-selected-text: #ffffff;
+    --yellow: #f9df6d;
+    --green: #a0c35a;
+    --blue: #b0c4ef;
+    --purple: #ba81c5;
+    --accent: #121212;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 14px rgba(0,0,0,.06);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161616;
+      --surface: #222222;
+      --text: #f0f0f0;
+      --text-muted: #9a9a9a;
+      --border: #3a3a3a;
+      --tile-bg: #3a3a34;
+      --tile-selected-bg: #d8d6c9;
+      --tile-selected-text: #121212;
+      --accent: #f0f0f0;
+      --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px 60px;
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 20px; }
+  header h1 {
+    font-size: 1.7rem;
+    letter-spacing: .5px;
+    font-weight: 700;
+  }
+  header h1 .dots span {
+    display: inline-block;
+    width: .55em; height: .55em;
+    border-radius: 50%;
+    margin: 0 1px 2px;
+  }
+  header p { color: var(--text-muted); font-size: .9rem; margin-top: 4px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  .card h2 {
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+
+  /* ---- word entry ---- */
+  #entry textarea {
+    width: 100%;
+    min-height: 90px;
+    resize: vertical;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: .95rem;
+  }
+  #entry textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .entry-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 10px; gap: 10px; flex-wrap: wrap;
+  }
+  #wordCount { font-size: .85rem; color: var(--text-muted); }
+  #wordCount.ok { color: #2e8540; font-weight: 600; }
+  #wordCount.over { color: #c0392b; font-weight: 600; }
+
+  button {
+    font: inherit;
+    font-size: .9rem;
+    font-weight: 600;
+    padding: 9px 18px;
+    border-radius: 999px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    transition: background .15s, opacity .15s, transform .05s;
+  }
+  button:hover:not(:disabled) { background: rgba(128,128,128,.12); }
+  button:active:not(:disabled) { transform: scale(.98); }
+  button.primary { background: var(--accent); color: var(--bg); }
+  button.primary:hover:not(:disabled) { opacity: .85; background: var(--accent); }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  button.small { padding: 5px 12px; font-size: .78rem; }
+
+  /* ---- board ---- */
+  #board { display: none; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .tile {
+    position: relative;
+    background: var(--tile-bg);
+    border: none;
+    border-radius: 8px;
+    min-height: 72px;
+    padding: 6px 4px;
+    font-weight: 700;
+    font-size: clamp(.6rem, 2.4vw, .85rem);
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    color: var(--text);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+    word-break: break-word;
+    line-height: 1.15;
+    transition: background .12s, color .12s, transform .08s;
+  }
+  .tile:hover { transform: scale(1.02); }
+  .tile.selected { background: var(--tile-selected-bg); color: var(--tile-selected-text); }
+  .tile.g-yellow { background: var(--yellow); color: #121212; }
+  .tile.g-green  { background: var(--green);  color: #121212; }
+  .tile.g-blue   { background: var(--blue);   color: #121212; }
+  .tile.g-purple { background: var(--purple); color: #121212; }
+  .tile .badge {
+    position: absolute; top: 4px; right: 5px;
+    font-size: .55rem; opacity: .55;
+  }
+
+  .toolbar {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    margin-bottom: 16px;
+  }
+  .toolbar .spacer { flex: 1; }
+
+  .group-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .gbtn {
+    flex: 1 1 100px;
+    border: none;
+    color: #121212;
+    padding: 10px 8px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: .8rem;
+  }
+  .gbtn.yellow { background: var(--yellow); }
+  .gbtn.green  { background: var(--green); }
+  .gbtn.blue   { background: var(--blue); }
+  .gbtn.purple { background: var(--purple); }
+  .gbtn:hover:not(:disabled) { filter: brightness(1.06); background: initial; }
+  .gbtn.yellow:hover:not(:disabled) { background: var(--yellow); }
+  .gbtn.green:hover:not(:disabled)  { background: var(--green); }
+  .gbtn.blue:hover:not(:disabled)   { background: var(--blue); }
+  .gbtn.purple:hover:not(:disabled) { background: var(--purple); }
+  .hint-line { font-size: .8rem; color: var(--text-muted); margin-bottom: 14px; }
+
+  /* ---- candidate groups ---- */
+  .group-row {
+    display: flex; align-items: center; gap: 10px;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    color: #121212;
+  }
+  .group-row.yellow { background: var(--yellow); }
+  .group-row.green  { background: var(--green); }
+  .group-row.blue   { background: var(--blue); }
+  .group-row.purple { background: var(--purple); }
+  .group-row .theme-input {
+    flex: 0 0 32%;
+    border: none;
+    border-bottom: 1.5px dashed rgba(0,0,0,.35);
+    background: transparent;
+    font: inherit; font-weight: 700; font-size: .8rem;
+    color: #121212;
+    padding: 2px 0;
+    min-width: 0;
+  }
+  .group-row .theme-input::placeholder { color: rgba(0,0,0,.45); }
+  .group-row .theme-input:focus { outline: none; border-bottom-color: #121212; }
+  .group-row .words {
+    flex: 1;
+    font-size: .8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .group-row .clear-g {
+    border: none; background: rgba(0,0,0,.15); color: #121212;
+    width: 24px; height: 24px; border-radius: 50%;
+    font-size: .8rem; line-height: 1; padding: 0;
+    flex-shrink: 0;
+  }
+  .group-row.empty { opacity: .45; }
+  .group-row.empty .words { font-style: italic; text-transform: none; font-weight: 400; }
+
+  /* ---- AI section ---- */
+  #ai .copy-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 14px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  #ai .copy-note { font-size: .78rem; color: var(--text-muted); flex: 1; min-width: 200px; line-height: 1.4; }
+  #copyStatus { font-size: .8rem; font-weight: 600; color: #2e8540; }
+  #ai .key-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #ai input[type="password"], #ai input[type="text"] {
+    flex: 1;
+    min-width: 220px;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit; font-size: .85rem;
+  }
+  #ai .note { font-size: .75rem; color: var(--text-muted); margin-top: 8px; line-height: 1.5; }
+  #aiStatus { font-size: .85rem; margin-top: 10px; min-height: 1.2em; }
+  #aiStatus.err { color: #c0392b; }
+  #aiStatus.busy { color: var(--text-muted); }
+  .ai-suggestion {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+  }
+  .ai-suggestion .sg-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 6px 8px; border-radius: 6px; margin-bottom: 6px;
+    color: #121212; font-size: .82rem; flex-wrap: wrap;
+  }
+  .ai-suggestion .sg-row b { text-transform: uppercase; font-size: .78rem; }
+  .ai-suggestion .reason { font-size: .78rem; color: var(--text-muted); margin: 2px 0 10px; line-height: 1.5; }
+  .confidence { font-size: .72rem; opacity: .7; margin-left: auto; white-space: nowrap; }
+
+  details summary {
+    cursor: pointer; font-size: .85rem; font-weight: 600;
+    color: var(--text-muted); user-select: none;
+  }
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid var(--text-muted); border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: -2px; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .solved-banner {
+    text-align: center; padding: 14px; border-radius: 8px;
+    background: linear-gradient(90deg, var(--yellow), var(--green), var(--blue), var(--purple));
+    color: #121212; font-weight: 700; margin-bottom: 14px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Connections Solver
+      <span class="dots">
+        <span style="background:var(--yellow)"></span><span style="background:var(--green)"></span><span style="background:var(--blue)"></span><span style="background:var(--purple)"></span>
+      </span>
+    </h1>
+    <p>A workspace for cracking the NYT Connections puzzle</p>
+  </header>
+
+  <!-- STEP 1: word entry -->
+  <section class="card" id="entry">
+    <h2>1 &middot; Enter the 16 words</h2>
+    <textarea id="wordInput" placeholder="Type or paste the 16 words, separated by commas, spaces or new lines&#10;e.g. BASS, FLOUNDER, SALMON, TROUT, APPLE, ..."></textarea>
+    <div class="entry-meta">
+      <span id="wordCount">0 / 16 words</span>
+      <div style="display:flex; gap:8px;">
+        <button id="clearEntryBtn" class="small">Clear</button>
+        <button id="startBtn" class="primary" disabled>Build Board</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2: interactive board -->
+  <section id="board">
+    <div class="card">
+      <h2>2 &middot; Work the puzzle</h2>
+      <div class="solved-banner" id="solvedBanner">🎉 All four groups placed — good luck with the real submit!</div>
+      <div class="grid" id="grid"></div>
+      <div class="toolbar">
+        <button id="shuffleBtn" class="small">Shuffle</button>
+        <button id="deselectBtn" class="small">Deselect</button>
+        <span class="spacer"></span>
+        <button id="resetGroupsBtn" class="small">Reset groups</button>
+        <button id="newPuzzleBtn" class="small">New puzzle</button>
+      </div>
+      <div class="group-btns">
+        <button class="gbtn yellow" data-color="yellow" disabled>🟨 Yellow</button>
+        <button class="gbtn green"  data-color="green"  disabled>🟩 Green</button>
+        <button class="gbtn blue"   data-color="blue"   disabled>🟦 Blue</button>
+        <button class="gbtn purple" data-color="purple" disabled>🟪 Purple</button>
+      </div>
+      <div class="hint-line">Select 4 tiles, then hit a colour to pin them as a candidate group. Yellow is usually easiest, purple the trickiest.</div>
+      <div id="groupList"></div>
+    </div>
+
+    <!-- STEP 3: AI assist -->
+    <section class="card" id="ai">
+      <h2>3 &middot; AI assist (optional)</h2>
+      <div class="copy-row">
+        <button id="copyPromptBtn" class="small">📋 Copy prompt</button>
+        <span class="copy-note">No API key? Copy a solving prompt and paste it into <a href="https://claude.ai" target="_blank" rel="noopener" style="color:inherit">claude.ai</a> (free) or any chatbot.</span>
+        <span id="copyStatus"></span>
+      </div>
+      <details id="aiDetails">
+        <summary>Ask Claude to solve it</summary>
+        <div style="margin-top:12px;">
+          <div class="key-row">
+            <input type="password" id="apiKey" placeholder="Anthropic API key (sk-ant-...)" autocomplete="off">
+            <button id="solveBtn" class="primary">Solve with Claude</button>
+          </div>
+          <div class="note">
+            Requires an <a href="https://console.anthropic.com/" target="_blank" rel="noopener" style="color:inherit">Anthropic API key</a>.
+            The key is only kept in this browser tab (optionally in localStorage) and sent directly to api.anthropic.com — nowhere else.
+            <label style="display:block; margin-top:6px;"><input type="checkbox" id="rememberKey"> Remember key in this browser</label>
+          </div>
+          <div id="aiStatus"></div>
+          <div id="aiResult"></div>
+        </div>
+      </details>
+    </section>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const COLORS = ["yellow", "green", "blue", "purple"];
+  const COLOR_EMOJI = { yellow: "🟨", green: "🟩", blue: "🟦", purple: "🟪" };
+
+  /** state */
+  let words = [];              // 16 uppercase words, board order (shuffles)
+  let selected = new Set();    // words currently selected
+  let groups = { yellow: null, green: null, blue: null, purple: null }; // {words:[..], theme:""}
+
+  const $ = (id) => document.getElementById(id);
+  const entryCard = $("entry"), boardSection = $("board");
+  const wordInput = $("wordInput"), wordCountEl = $("wordCount"), startBtn = $("startBtn");
+  const grid = $("grid"), groupList = $("groupList"), solvedBanner = $("solvedBanner");
+  const aiStatus = $("aiStatus"), aiResult = $("aiResult");
+
+  /* ---------------- word entry ---------------- */
+
+  function parseWords(text) {
+    // split on commas, semicolons, tabs, newlines; fall back to spaces
+    let parts = text.split(/[,;\t\n]+/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length <= 1 && text.trim()) parts = text.trim().split(/\s+/);
+    // Connections answers can be multi-word only rarely; treat space-splitting
+    // as the fallback. De-dupe, uppercase.
+    const seen = new Set();
+    const out = [];
+    for (const p of parts) {
+      const w = p.toUpperCase();
+      if (!seen.has(w)) { seen.add(w); out.push(w); }
+    }
+    return out;
+  }
+
+  function updateWordCount() {
+    const n = parseWords(wordInput.value).length;
+    wordCountEl.textContent = n + " / 16 words";
+    wordCountEl.className = n === 16 ? "ok" : n > 16 ? "over" : "";
+    startBtn.disabled = n !== 16;
+  }
+  wordInput.addEventListener("input", updateWordCount);
+  $("clearEntryBtn").addEventListener("click", () => { wordInput.value = ""; updateWordCount(); wordInput.focus(); });
+
+  startBtn.addEventListener("click", () => {
+    words = parseWords(wordInput.value);
+    if (words.length !== 16) return;
+    selected.clear();
+    groups = { yellow: null, green: null, blue: null, purple: null };
+    entryCard.style.display = "none";
+    boardSection.style.display = "block";
+    saveState();
+    render();
+  });
+
+  /* ---------------- board ---------------- */
+
+  function colorOf(word) {
+    for (const c of COLORS) if (groups[c] && groups[c].words.includes(word)) return c;
+    return null;
+  }
+
+  function render() {
+    // grid
+    grid.innerHTML = "";
+    for (const w of words) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tile";
+      btn.textContent = w;
+      const c = colorOf(w);
+      if (c) {
+        btn.classList.add("g-" + c);
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        badge.textContent = COLOR_EMOJI[c];
+        btn.appendChild(badge);
+      } else if (selected.has(w)) {
+        btn.classList.add("selected");
+      }
+      btn.addEventListener("click", () => onTileClick(w));
+      grid.appendChild(btn);
+    }
+
+    // group colour buttons enabled only with exactly 4 free tiles selected
+    const canGroup = selected.size === 4;
+    document.querySelectorAll(".gbtn").forEach((b) => {
+      b.disabled = !canGroup || groups[b.dataset.color] !== null;
+    });
+
+    // candidate group rows
+    groupList.innerHTML = "";
+    for (const c of COLORS) {
+      const row = document.createElement("div");
+      row.className = "group-row " + c + (groups[c] ? "" : " empty");
+      const theme = document.createElement("input");
+      theme.className = "theme-input";
+      theme.placeholder = c.charAt(0).toUpperCase() + c.slice(1) + " theme?";
+      theme.value = groups[c] ? groups[c].theme : "";
+      theme.disabled = !groups[c];
+      theme.addEventListener("input", () => { if (groups[c]) { groups[c].theme = theme.value; saveState(); } });
+      const wordsEl = document.createElement("div");
+      wordsEl.className = "words";
+      wordsEl.textContent = groups[c] ? groups[c].words.join(", ") : "select 4 tiles and pin them here";
+      row.appendChild(theme);
+      row.appendChild(wordsEl);
+      if (groups[c]) {
+        const clear = document.createElement("button");
+        clear.className = "clear-g";
+        clear.title = "Unpin this group";
+        clear.textContent = "×";
+        clear.addEventListener("click", () => { groups[c] = null; saveState(); render(); });
+        row.appendChild(clear);
+      }
+      groupList.appendChild(row);
+    }
+
+    solvedBanner.style.display = COLORS.every((c) => groups[c]) ? "block" : "none";
+  }
+
+  function onTileClick(w) {
+    const c = colorOf(w);
+    if (c) { // clicking a pinned tile unpins its whole group
+      groups[c] = null;
+      saveState();
+      render();
+      return;
+    }
+    if (selected.has(w)) selected.delete(w);
+    else if (selected.size < 4) selected.add(w);
+    render();
+  }
+
+  document.querySelectorAll(".gbtn").forEach((b) => {
+    b.addEventListener("click", () => {
+      const c = b.dataset.color;
+      if (selected.size !== 4 || groups[c]) return;
+      groups[c] = { words: [...selected], theme: "" };
+      selected.clear();
+      saveState();
+      render();
+    });
+  });
+
+  $("shuffleBtn").addEventListener("click", () => {
+    for (let i = words.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [words[i], words[j]] = [words[j], words[i]];
+    }
+    saveState();
+    render();
+  });
+  $("deselectBtn").addEventListener("click", () => { selected.clear(); render(); });
+  $("resetGroupsBtn").addEventListener("click", () => {
+    groups = { yellow: null, green: null, blue: null, purple: null };
+    selected.clear();
+    saveState();
+    render();
+  });
+  $("newPuzzleBtn").addEventListener("click", () => {
+    if (!confirm("Start a new puzzle? Current board will be cleared.")) return;
+    boardSection.style.display = "none";
+    entryCard.style.display = "block";
+    wordInput.value = "";
+    aiResult.innerHTML = "";
+    setAiStatus("");
+    localStorage.removeItem("connections-solver-state");
+    updateWordCount();
+    wordInput.focus();
+  });
+
+  /* ---------------- persistence ---------------- */
+
+  function saveState() {
+    try {
+      localStorage.setItem("connections-solver-state", JSON.stringify({ words, groups }));
+    } catch (e) { /* private mode etc. */ }
+  }
+  function loadState() {
+    try {
+      const raw = localStorage.getItem("connections-solver-state");
+      if (!raw) return false;
+      const s = JSON.parse(raw);
+      if (!Array.isArray(s.words) || s.words.length !== 16) return false;
+      words = s.words;
+      groups = Object.assign({ yellow: null, green: null, blue: null, purple: null }, s.groups);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* ---------------- AI assist ---------------- */
+
+  function promptIntro() {
+    return (
+      'You are solving a New York Times "Connections" puzzle. There are exactly 16 words that form ' +
+      "4 groups of 4, each sharing a hidden theme. Difficulty runs yellow (easiest), green, blue, purple " +
+      "(trickiest — often wordplay: homophones, ___ + word, hidden words, etc.). Beware of red herrings: " +
+      "5 words may seem to fit one theme but only 4 belong.\n\n" +
+      "The 16 words:\n" + words.join(", ") + "\n\n"
+    );
+  }
+
+  /* -- copy prompt (no API key needed) -- */
+
+  const copyStatus = $("copyStatus");
+  let copyStatusTimer = null;
+
+  $("copyPromptBtn").addEventListener("click", async () => {
+    if (words.length !== 16) return;
+    const prompt = promptIntro() +
+      "Think carefully, then give your answer as the 4 groups with their themes, " +
+      "your confidence in each (high/medium/low), and a couple of sentences on the " +
+      "trickiest calls and any red herrings you spotted. " +
+      "Every one of the 16 words must appear exactly once.";
+    let ok = true;
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch (e) {
+      // fallback for browsers that block the clipboard API on file://
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = prompt;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        ta.remove();
+      } catch (e2) { ok = false; }
+    }
+    copyStatus.textContent = ok ? "Copied! Paste it into your chatbot." : "Copy failed — select and copy manually.";
+    copyStatus.style.color = ok ? "" : "#c0392b";
+    clearTimeout(copyStatusTimer);
+    copyStatusTimer = setTimeout(() => { copyStatus.textContent = ""; }, 4000);
+  });
+
+  const apiKeyInput = $("apiKey"), rememberKey = $("rememberKey"), solveBtn = $("solveBtn");
+
+  try {
+    const savedKey = localStorage.getItem("connections-solver-key");
+    if (savedKey) { apiKeyInput.value = savedKey; rememberKey.checked = true; }
+  } catch (e) {}
+
+  rememberKey.addEventListener("change", () => {
+    try {
+      if (rememberKey.checked && apiKeyInput.value) localStorage.setItem("connections-solver-key", apiKeyInput.value);
+      else localStorage.removeItem("connections-solver-key");
+    } catch (e) {}
+  });
+
+  function setAiStatus(msg, cls) {
+    aiStatus.textContent = "";
+    aiStatus.className = cls || "";
+    if (cls === "busy") {
+      const sp = document.createElement("span");
+      sp.className = "spinner";
+      aiStatus.appendChild(sp);
+    }
+    aiStatus.appendChild(document.createTextNode(msg));
+  }
+
+  solveBtn.addEventListener("click", async () => {
+    const key = apiKeyInput.value.trim();
+    if (!key) { setAiStatus("Enter an API key first.", "err"); return; }
+    if (words.length !== 16) { setAiStatus("Build the board first.", "err"); return; }
+    if (rememberKey.checked) { try { localStorage.setItem("connections-solver-key", key); } catch (e) {} }
+
+    solveBtn.disabled = true;
+    setAiStatus("Thinking… Claude is grouping the words.", "busy");
+    aiResult.innerHTML = "";
+
+    const prompt = promptIntro() +
+      "Think carefully, then answer with ONLY a JSON object (no markdown fences) in this exact shape:\n" +
+      '{"groups":[{"color":"yellow","theme":"...","words":["W1","W2","W3","W4"],"confidence":"high|medium|low"},' +
+      ' {"color":"green",...},{"color":"blue",...},{"color":"purple",...}],' +
+      '"reasoning":"2-3 sentences on the trickiest calls and any red herrings you spotted"}\n' +
+      "Every one of the 16 words must appear exactly once, spelled exactly as given.";
+
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-5",
+          max_tokens: 2000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        let msg = "API error " + resp.status;
+        try { msg += ": " + (JSON.parse(body).error.message || body); } catch (e) { msg += ": " + body.slice(0, 200); }
+        throw new Error(msg);
+      }
+      const data = await resp.json();
+      const text = (data.content || []).map((b) => b.text || "").join("");
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("Could not find JSON in the model response.");
+      const parsed = JSON.parse(match[0]);
+      if (!parsed.groups || parsed.groups.length !== 4) throw new Error("Response did not contain 4 groups.");
+      renderSuggestion(parsed);
+      setAiStatus("Done — review the suggestion below.");
+    } catch (err) {
+      setAiStatus(err.message || String(err), "err");
+    } finally {
+      solveBtn.disabled = false;
+    }
+  });
+
+  function renderSuggestion(parsed) {
+    aiResult.innerHTML = "";
+    const box = document.createElement("div");
+    box.className = "ai-suggestion";
+
+    const known = new Set(words);
+    let coverageWarning = false;
+    const seen = new Set();
+    for (const g of parsed.groups) for (const w of (g.words || [])) {
+      const W = String(w).toUpperCase();
+      if (!known.has(W) || seen.has(W)) coverageWarning = true;
+      seen.add(W);
+    }
+    if (seen.size !== 16) coverageWarning = true;
+
+    for (const g of parsed.groups) {
+      const row = document.createElement("div");
+      row.className = "sg-row " + (COLORS.includes(g.color) ? g.color : "yellow");
+      row.style.background = "var(--" + (COLORS.includes(g.color) ? g.color : "yellow") + ")";
+      const b = document.createElement("b");
+      b.textContent = (g.theme || "?") + ":";
+      const span = document.createElement("span");
+      span.textContent = (g.words || []).join(", ");
+      span.style.textTransform = "uppercase";
+      const conf = document.createElement("span");
+      conf.className = "confidence";
+      conf.textContent = g.confidence ? g.confidence + " confidence" : "";
+      row.appendChild(b); row.appendChild(span); row.appendChild(conf);
+      box.appendChild(row);
+    }
+
+    if (parsed.reasoning) {
+      const r = document.createElement("div");
+      r.className = "reason";
+      r.textContent = "💭 " + parsed.reasoning;
+      box.appendChild(r);
+    }
+    if (coverageWarning) {
+      const warn = document.createElement("div");
+      warn.className = "reason";
+      warn.style.color = "#c0392b";
+      warn.textContent = "⚠️ The suggestion doesn't cover all 16 words exactly once — double-check before trusting it.";
+      box.appendChild(warn);
+    }
+
+    const apply = document.createElement("button");
+    apply.className = "primary small";
+    apply.textContent = "Apply to board";
+    apply.addEventListener("click", () => {
+      const next = { yellow: null, green: null, blue: null, purple: null };
+      for (const g of parsed.groups) {
+        const c = COLORS.includes(g.color) ? g.color : null;
+        if (!c) continue;
+        const ws = (g.words || []).map((w) => String(w).toUpperCase()).filter((w) => known.has(w));
+        if (ws.length === 4) next[c] = { words: ws, theme: g.theme || "" };
+      }
+      groups = next;
+      selected.clear();
+      saveState();
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+    box.appendChild(apply);
+    aiResult.appendChild(box);
+  }
+
+  /* ---------------- boot ---------------- */
+
+  if (loadState()) {
+    entryCard.style.display = "none";
+    boardSection.style.display = "block";
+    render();
+  } else {
+    updateWordCount();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wordle Solver</title>
+<style>
+  :root {
+    --bg: #121213;
+    --panel: #1a1a1b;
+    --border: #3a3a3c;
+    --text: #ffffff;
+    --muted: #818384;
+    --gray: #3a3a3c;
+    --yellow: #b59f3b;
+    --green: #538d4e;
+    --accent: #6aaa64;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+  }
+  h1 {
+    font-weight: 800;
+    letter-spacing: 2px;
+    margin: 8px 0 4px;
+    text-transform: uppercase;
+    font-size: 1.6rem;
+  }
+  .subtitle { color: var(--muted); margin: 0 0 16px; font-size: 0.9rem; text-align: center; }
+  .layout {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+    max-width: 900px;
+  }
+  .board-col { display: flex; flex-direction: column; align-items: center; }
+  .board { display: grid; grid-template-rows: repeat(6, 1fr); gap: 6px; margin-bottom: 16px; }
+  .row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .tile {
+    width: 58px; height: 58px;
+    border: 2px solid var(--border);
+    background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2rem; font-weight: 700; text-transform: uppercase;
+    cursor: pointer; user-select: none;
+    transition: background 0.15s, border-color 0.15s, transform 0.05s;
+    border-radius: 4px;
+  }
+  .tile:active { transform: scale(0.94); }
+  .tile.filled { border-color: #565758; }
+  .tile.gray { background: var(--gray); border-color: var(--gray); }
+  .tile.yellow { background: var(--yellow); border-color: var(--yellow); }
+  .tile.green { background: var(--green); border-color: var(--green); }
+  .tile.active { border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 0.8rem; margin: 0 0 12px; text-align: center; max-width: 320px; }
+  .controls { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; justify-content: center; }
+  button.btn {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 14px; font-size: 0.85rem; cursor: pointer; font-weight: 600;
+  }
+  button.btn:hover { background: #2a2a2b; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.btn.primary:hover { background: #599a54; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; width: 320px;
+  }
+  .panel h2 { margin: 0 0 4px; font-size: 1rem; }
+  .count { color: var(--muted); font-size: 0.8rem; margin: 0 0 12px; }
+  .suggestions { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+  .sugg {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #232324; border-radius: 6px; padding: 8px 12px;
+    font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  }
+  .sugg .score { color: var(--muted); font-size: 0.75rem; font-weight: 400; letter-spacing: 0; }
+  .sugg.best { border: 1px solid var(--accent); }
+  .sugg .word { cursor: pointer; }
+  .sugg .word:hover { color: var(--accent); }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  .keyboard { display: flex; flex-direction: column; gap: 6px; align-items: center; margin-top: 4px; }
+  .krow { display: flex; gap: 5px; }
+  .key {
+    background: #818384; color: #fff; border: none; border-radius: 4px;
+    min-width: 32px; height: 46px; font-weight: 700; cursor: pointer;
+    text-transform: uppercase; font-size: 0.85rem; padding: 0 8px;
+  }
+  .key.wide { min-width: 56px; font-size: 0.7rem; }
+  .key.gray { background: var(--gray); }
+  .key.yellow { background: var(--yellow); }
+  .key.green { background: var(--green); }
+  .footer-note { color: var(--muted); font-size: 0.75rem; margin-top: 18px; text-align: center; max-width: 500px; }
+</style>
+</head>
+<body>
+  <h1>Wordle Solver</h1>
+  <p class="subtitle">Type your guesses, click each tile to set its colour, and get ranked suggestions for your next move.</p>
+
+  <div class="layout">
+    <div class="board-col">
+      <div class="board" id="board"></div>
+      <p class="hint">Tap a tile repeatedly to cycle: <strong>gray</strong> → <strong>yellow</strong> → <strong>green</strong>. Then press <strong>Solve</strong>.</p>
+      <div class="controls">
+        <button class="btn primary" id="solveBtn">Solve</button>
+        <button class="btn" id="clearRowBtn">Clear Row</button>
+        <button class="btn" id="resetBtn">Reset All</button>
+      </div>
+      <div class="keyboard" id="keyboard"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Suggestions</h2>
+      <p class="count" id="count">Enter a guess to begin.</p>
+      <div class="suggestions" id="suggestions">
+        <div class="empty">No guesses yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="footer-note">
+    Suggestions are ranked by letter-frequency scoring across remaining possible answers — words covering the most likely, most varied letters float to the top. Click any suggested word to load it into the current row.
+  </p>
+
+<script>
+// ---------- Word list (common 5-letter English words) ----------
+const WORDS = "aback abase abate abbey abbot abhor abide abled abode abort about above abuse abyss acari acerb ached acids acing acmes acned acorn acres acrid acted actor acute adage adapt added adder addle adept admin admit adobe adopt adore adorn adult affix afire afoot afoul after again agape agate agave agency agent agile aging aglow agony agora agree ahead aided aides aimed aired aisle alarm album alder alert algae alias alibi alien align alike alive alley allot allow alloy aloft alone along aloof aloud alpha altar alter amass amaze amber amble ambit amend amids amino amiss amity among ample amply amuse angel anger angle angry angst anime ankle annex annoy annul anode antic antsy anvil aorta apart aphid aping apnea apple apply apron aptly arbor ardor arena argue arise armed armor aroma arose array arrow arson artsy ascot ashen aside asked askew aspen aster astir atlas atoll atone attic audio audit auger aught augur aunts aural autos avail avert avian avoid await awake award aware awash awful awoke axial axiom axles axion azure bacon badge badly bagel baggy baked baker baler balls balmy banal bands bandy bangs banjo barge barns baron based baser bases basic basil basin basis baste batch bated bathe baton batty bawdy bayou beach beads beady beans beard beast beech beefy befit began begat begin begun being belch belie belle belly below bench bends beret berry berth beset betas bevel bezel bible bicep biddy bigot biker bilge bilked billy bimbo bingo biome birch birds birth bison bitsy black blade blame bland blank blare blast blaze bleak bleat bleed bleep blend bless blimp blind blink bliss blitz bloat block bloke blond blood bloom blown bluer blues bluff blunt blurb blurt blush board boast boats bobby boded bodes bogey boggy bogus boils boldly bolts bonds boned bones bongo bonus boobs booby boost booth boots booty booze boozy borax bored borne bosom bossy botch bough bound bowed bowel bower boxed boxer brace braid brain brake brand brash brass brave bravo brawl brawn bread break breed briar bribe brick bride brief brine bring brink briny brisk broad broil broke brood brook broom broth brown brunt brush brute buddy budge buggy bugle build built bulge bulgy bulky bully bumpy bunch bunny burly burns burnt burro burst bushy busts butch butte buxom buyer bygone cabal cabin cable cacao cache cacti caddy cadet cadre cagey cairn caked cakes camel cameo candy canes canny canoe caper capon caput carat cards cared cares cargo carol carry carts carve cased cases caste catch cater catty caulk cause caved caves cease cedar ceded cello cells celts chafe chaff chain chair chalk champ chant chaos chaps chard charm chars chart chase chasm cheap cheat check cheek cheep cheer chess chest chewy chick chide chief child chili chill chime chimp china chink chips chirp chock choir choke chomp chops chord chore chose chuck chump chunk churn chute cider cigar cinch circa cited cites civic civil clack claim clamp clams clang clank clans clash clasp class clave claws clean clear cleat clack cleft clerk click cliff climb clime cling clink cloak clock clomp clone close cloth cloud clout clove clown cloze cluck clued clues clump clung coach coals coast coats cobra cocoa colon color combo comet comfy comic comma conch condo cones conic copra coral cords cores corns corny corps couch cough could count coupe court coven cover covet covey cowed cower cozy crabs crack craft cramp crane crank crash crass crate crave crawl craze crazy creak cream credo creed creek creep creme crepe crept cress crest crick cried crier crime crimp crisp croak crock crone crony crook croon crops cross croup crowd crown crude cruel crumb cruse crush crust crypt cubed cubes cubic cuffs cumin curbs curds cured curio curls curly curry curse curve curvy cushy cutie cyber cycle cynic daddy daily dairy daisy dally dance dandy dared dares datum daunt david dazed deals dealt death debar debit debts debug debut decal decay decor decoy decry deeds deems defer deign deity delay delta delve demon demos denim dense depot depth derby deter detox deuce devil diary diced dicey digit dimly dined diner dingo dingy dints diode dirge dirty disco ditch ditty divas dived diver dives divot dizzy docks dodge dodgy doers doily doing dolly donor donut dopey doses doted dotes dotty doubt dough douse doves dowdy dowel downs dowry dozen draft drain drake drama drank drape drawl drawn draws dread dream dress dried drier drift drill drink drips drive droll drone drool droop drops dross drove drown drugs drums drunk dryer dryly ducks duchy ducts dudes duels duets duke dulls dully dummy dumps dumpy dunce dunes dungs dunk dusks dusky dusts dusty dwarf dwell dwelt dyers dying eager eagle early earns earth eased easel eases eaten eater ebony edged edges edict edify eerie egret eight eject eking elate elbow elder elect elegy elfin elide elite elope elude elves email embed ember emcee emery emits empty emote enact ended endow enema enemy enjoy ennui ensue enter entry envoy epoch epoxy equal equip erase erect erode erred error erupt essay ester ether ethic ethos evade evens event every evict evils evoke exact exalt exams excel exert exile exist expel extol extra exult eyeing fable faced facet facts faded fades fairy faith faked faker fakes falls false famed fancy fangs farce fared fares farms fasts fatal fated fatty fault fauna favor feast feats fecal feign feint fella felon femur fence feral ferns ferry fests fetal fetch fetid fetus fever fewer fiber fibre ficus field fiend fiery fifth fifty fight filed filer files filet fills filly films filmy filth final finch fined finer fines fired fires firms first fishy fists fits fives fixed fixer fizz fjord flack flags flail flair flake flaky flame flank flaps flare flash flask fleas fleck fleck flees fleet flesh flick flier flies fling flint flirt float flock floes flood floor flora floss flour flout flown flows fluff fluid fluke fluky flume flung flunk flush flute flyer foams foamy focal focus foggy foils foist folds folio folks folly fonts foods fools foray force fords forge forgo forks forms forte forth forty forum fouls found fount fours fowls foxes foyer frail frame franc frank fraud frays freak freed freer fresh friar fried fries frill frisk fritz frock frond front frost froth frown froze fruit frump fryer fudge fuels fully fumed fumes funds fungi funky funny furor furry fused fuses fussy fusty futon fuzzy gable gaffe gaily gains gala gales gamer games gamma gamut gangs gases gassy gaudy gauge gaunt gauze gauzy gavel gawky gawks gazed gazer gazes gears gecko geeks geese gems genie genre germs ghost ghoul giant giddy gifts gilds gills gimpy gird girls girth given giver gives glade gland glare glass glaze gleam glean glide glint gloat globe gloom glory gloss glove glows glued glues gluts glyph gnash gnome goals goats godly going golds golem golfs gonad goner gongs gonna goods goody gooey goofs goofy goose gored gores gorge gory gosh gouge gourd gowns grabs grace grade graft grail grain grams grand grant grape graph grasp grass grate grave gravy graze great greed green greet grew grey grief grill grime grimy grind grins gripe grips grist grits groan groin groom grope gross group grout grove growl grown grows grubs gruel gruff grunt guard guava guess guest guide guild guile guilt guise gulch gulfs gully gulps gumbo gummy gunk guppy gurus gushy gusto gusts gusty gutsy gutsy gypsy gyrus habit hacks hairs hairy halls halos halts halve hands handy hangs happy hardy hared harem hares harms harps harsh haste hasty hatch hated hater hates hauls haunt haven havoc hawks hazel hazes heads heady heald heals heaps heard hears heart heath heave heavy hedge heels hefty heirs heist helix hello helms helps hence herbs herds heron hertz hewed hicks hides hiked hiker hikes hilly hinge hinted hints hippo hippy hired hires hitch hived hoard hoary hobby hocks hoist holds holed holes holly homed homes honed honey honor hooch hoods hooed hoofs hooks hooky hoops hoped hopes horde horns horny horse hoses hosts hotel hotly hound hours house hovel hover howdy howls hubby huffy huger hulls human humid humor humps humus hunch hunks hunky hunts hurls hurry hurts husks husky hussy hutch hydra hyena hying hymns hyped hyper icers icing icons ideal ideas idiom idiot idled idler idles idols igloo image imbue impel imply inane inapt incur index inept inert infer ingot inked inlay inlet inned inner input inset intel inter intro irate irises irked irons irony islet issue itchy items ivory ivied jaded jails jammy japan jaunt jazzy jeans jeeps jelly jenny jerks jerky jetty jewel jiffy jilts jingo joint joist joked joker jokes jolly jolts joust jowls judge juice juicy jumbo jumps jumpy junky junta juror kabob kale kappa kayak kazoo kebab keels keens keeps kelps kelp kempt kept kerns keto kazoo khaki kicks kicky kiddo kilns kilos kilts kinda kinds kings kinks kinky kiosk kites kitty kiwis klutz knack knave knead kneed kneel knees knell knelt knife knits knobs knock knoll knots known knows koala kraft kudos label labor laced laces lacks laden ladle lager lairs lakes lamps lance lands lanes lanky lapel lapse larch large larva laser lasso lasts latch later latex lathe laude laugh layer leach leads leaf leafy leaks leaky leant leaps leapt learn lease leash least leave ledge leech leeks leers leery lefts leggy legal lemon lemur lends leper letup level lever liars libel licks liege liens lifts light liked liken liker likes lilac limbo limbs limed limes limit limos lined linen liner lines lingo links lions lipid liter lithe lived liven liver lives livid llama loads loafs loamy loans loath lobby lobed local locks locus lodge lofts lofty logic login loins lolly loner longs looks looms loons loony loops loopy loose loots loped loser loses lotus louder lousy loved lover loves lower lowly loyal lucid lucky lumen lumps lumpy lunar lunch lunge lungs lupus lurch lured lures lurid lurks lusty lutes lying lymph lynch lyres lyric macaw macho macro madam madly mafia magic magma maids mails maims maize major maker makes malls malts mamas mamba mango mangy mania manic manly manna manor manse maple march mares marks marry marsh masks mason match mated mates matte mauve maven mavin maxim maybe mayor mazes meals mealy means meant meats meaty mecca medal media medic meets melds melee melon melts mends menus meows mercy merge merit merry mesas messy metal meted meter metro mewed micro middy midge midst miens might miked mikes milds miler miles milks milky mills mimes mimic mince minds mined miner mines minim minks minor mints minty minus mired mires mirth miser missy misty mites mitts mixed mixer moans moats mocha mochi mocks modal model modem modes moist molar molds moldy moles molts moms money monks month moods moody mooed moose moots moped moper mopes moral moras morel morns moron mosey mossy motel motes moths motif motor motto mould moult mound mount mourn mouse mousy mouth moved mover moves movie mowed mower mucks mucky mucus muddy muffs mufti muggy mulch mules mully mummy munch mural muras mused muser muses mushy music musks musky mussy musts musty muted mutes mutts myrrh myths nabob nacho nacre nadir naiad nails naive naked named names nanny napes nappy narcs nards nares naris narks nasal nasty natal navel naves nears necks needy neigh neons nerds nerdy nerve nests never newel newer newly newts nicer niche nicks niece nifty night nimbi nines ninja ninny ninth nippy nises nitro nixed nixes noble nobly nodal nodes noise noisy nomad nooks noose norms north nosed noses notch noted notes nouns novel noway nuance nubby nudge nudie nuked nukes numbs nurse nutty nylon nymph oaken oasis oaten oaths obese obeys oboes occur ocean octal octet odder oddly odors odour offal offed offer often ogled ogles ogres oiled oinks okapi olden older oldie olive omega omits onion onset oozed oozes opals opens opera opine opium opted optic orals orang orate orbit orca order organ oriel osier other otter ought ounce ousts outdo outed outer outgo overt ovine ovoid owing owlet owned owner oxbow oxide ozone paced pacer paces packs pacts paddy padre paean pagan paged pager pages pails pains paint pairs paled paler pales palms palsy panda paned panel panes pangs panic pansy pants papal papas paper parch pared pares parka parks parry parse parts party passe pasta paste pasts pasty patch pated paten pates paths patio patsy patty pause paved paver paves pawed pawns payed payee payer peace peach peaks pearl peats pecan pecks pedal peeks peels peeps peers peeve pelts penal pence penes penny peony peppy perch peril perks perky perms pesky pesos pesto petal peter petty pewee phase phlox phone phony photo phyla piano picks picky piece piers piety piggy piing pikas piked piker pikes piled piles pills pilot pimps pinch pined pines pings pinch pinks pinky pinto pints pinup pious piped piper pipes pique pitch pithy piton piety pivot pixel pixie pizza place plaid plain plait plane plank plans plant plate plaza plead pleas pleat plied plier plies plink plods plonk plops plots ploys pluck plugs plumb plume plump plums plunk plush poach pocks podgy poems poesy poets point poise poked poker pokes polar poled poles polio polka polls polyp ponds pones ponce pooch poods pooed pools poops popes poppy porch pored pores porks porky ports posed poser poses posit posse posts potty pouch pound pours pouts power poxed poxes prank prate prawn prays preen preps press prest prey price prick pride pried prier pries prima prime primo primp print prior prism privy prize probe prods profs prole promo proms prone prong proof props prose pross proud prove prowl prows proxy prude prune psalm pshaw psych pubic pubis puces pucks pudgy puffs puffy puked pukes pulls pulps pulpy pulse pumas pumps punch punks punky punts pupae pupal pupas pupil puppy puree purer purge purrs purse pushy putts putty pygmy pylon pyres python quack quaff quail quake qualm quark quart quash quasi quays queen queer quell query quest queue quick quids quiet quill quilt quint quips quire quirk quite quits quota quote quoth rabbi rabid raced racer races racks radar radii radio radon rafts raged rages raids rails rains rainy raise rajah raked rakes rally ramps ranch range rangy ranks rants raped rapes rapid rared rarer rased rasps raspy rated rates ratio ratty raved ravel raven raves rawer rayon razed razes razor reach react reads ready realm reams reaps rearm rears rebar rebel rebus rebut recap recta recur redox redux reedy reefs reeks reels refer refit regal rehab reign reins relax relay relic relit remit renal rends renew rents repay repel reply reran rerun reset resin rests retch retro retry reuse revel revue rhino rhyme rials rices ricer rices ricks rider rides ridge rifer rifle rifts right rigid rigor riled riles rills rimed rimes rinds rings rinse riots ripen riper risen riser rises risks risky rites rival riven river rivet roach roads roams roans roars roast robed robes robin robot rocks rocky rodeo roger rogue roils roily roles rolls roman romps roods roofs rooks rooky rooms roomy roost roots roped ropes ropey roses rosin rotor rouge rough round rouse route routs rover roves rowdy rowed rower royal rubes ruble ruddy ruder ruffs rugby ruing ruins ruled ruler rules rumba rumen rummy rumor rumps runes rungs runic runny runts rural ruses rusks rusts rusty saber sable sacks sadly safer sagas sager sages sahib sails saint saith salad sales sally salon salsa salts salty salve salvo samba sands sandy saner sappy saran sated sates satin satyr sauce saucy sauna saved saver saves savor savoy savvy sawed saxes scabs scads scald scale scalp scaly scamp scams scans scant scare scarf scars scary scene scent schwa scion scoff scold scone scoop scoot scope scops score scorn scour scout scowl scram scrap screw scrim scrip scrod scrub scrum scuba scuds scuff scull scums scurf seals seams seamy sears seats sect sects sedan sedge seeds seedy seeks seems seeps seers segue seine seize sells semis sends senna sense sepal sepia serfs serge serif serum serve setup seven sever sewed sewer sexed sexes shack shade shads shady shaft shags shake shaky shale shall shalt shame shams shank shape shard share shark sharp shave shawl sheaf shear sheds sheen sheep sheer sheet sheik shelf shell shied shies shift shill shims shine shiny ships shire shirk shirr shirt shoal shock shoed shoes shone shook shoon shoos shoot shops shore shorn short shots shout shove shown shows showy shred shrew shrub shrug shuck shuns shunt shush shut shyer shyly sick sided sides sidle siege sieve sifts sighs sight sigma signs silks silky silly silos silts silty since sinew singe sings sinks sinus sired siren sires sissy sitar sited sites situp sixes sixth sixty sized sizer sizes skate skeet skews skid skids skied skier skies skiff skill skimp skims skink skins skirt skits skoal skulk skull skunk slabs slack slags slain slake slams slang slant slaps slash slate slats slaty slave slaws slays sleds sleek sleep sleet slept slews slice slick slide slily slime slimy sling slink slips slits slobs sloop slope slops slosh sloth slots slows slugs slump slums slung slunk slurp slurs slush sluts slyer slyly smack small smart smash smear smell smelt smile smirk smite smith smock smog smoke smoky smote snack snafu snags snail snake snaky snaps snare snarl sneak sneer snide sniff snipe snips snits snobs snoop snoot snore snort snots snout snows snowy snubs snuck snuff snug soaks soaps soapy soars sobby sober socks sodas sofas softy soggy soils solar soled soles solid solos solve sonar songs sonic sooth soots sooty soppy sorry sorta sorts souls sound soups soupy sours souse south sowed sower space spade spake spank spans spare spark spars spasm spate spawn spays speak spear speck specs speed spell spelt spend spent sperm spice spicy spied spiel spies spike spiky spill spilt spine spiny spire spite splat splay split spoil spoke spoof spook spool spoon spoor spore sport spots spout sprat spray spree sprig spuds spume spuns spunk spurn spurs spurt squab squad squat squaw squib stabs stack staff stage staid stain stair stake stale stalk stall stamp stand stank staph stare stark stars start stash state stats stave stays stead steak steal steam steed steel steep steer stein stems steps stern stews stick stied stiff stile still stilt sting stink stint stir stirs stoat stock stoic stoke stole stomp stone stony stood stool stoop stops store stork storm story stout stove stows strap straw stray strep strew strip strop strum strut stubs stuck studs study stuff stump stung stunk stuns stunt styes style suave sucks sudsy suede sugar suing suite suits sulks sulky sully sumac summon sumps sunny sunup super surer surfs surge surly sushi swabs swain swami swamp swans swaps sward swarm swash swath swats sways swear sweat swede sweep sweet swell swept swift swigs swill swims swine swing swipe swirl swish swiss swoon swoop swops sword swore sworn swung sylph synch syncs synod syrup tabby table taboo tabor tacit tacks tacky tacos taffy taint taken taker takes tales talks tally talon tamed tamer tames tango tangy tanks tansy taped taper tapes tapir tardy tared tares taros tarot tarps tarry tarts tased taser tasks taste tasty tatty taunt taupe tawny taxed taxes teach teaks teals teams tears teary tease teats techs teddy teems teens teeny teeth tells tempo temps tempt tench tends tenet tenon tenor tense tenth tents tepee tepid terms terns terra terse tests testy thank thaws theft their theme theory there these theta thick thief thigh thine thing think thins third thong thorn those thread three threw throb throw thrum thuds thugs thumb thump thyme tiara tibia ticks tidal tided tides tiers tiger tight tikes tilde tiled tiler tiles tills tilts timed timer times timid tined tines tinge tings tinny tints tipsy tired tires titan tithe title titre toads toady toast today toddy toffy togas toils token toled tolls tomb tombs tomes tonal toned toner tones tonga tongs tonic tools tooth toots topaz topic toque torch torsi torso torte torts torus total toted totem totes touch tough tour tours touts towed towel tower towns toxic toxin toyed trace track tract trade trail train trait tramp traps trash trawl trays tread treat treed trees treks trend tress triad trial tribe trice trick tried trier tries trike trill trims trios tripe trips trite troll tromp troop trope troth trots trout trove truce truck truer truly trump trunk truss trust truth tryst tubas tubby tubed tuber tubes tucks tufts tulip tulle tumid tummy tumor tunas tuned tuner tunes tunic turbo turfs turns tusks tutor tutus tuxes twang tweak tweed tweet twerp twice twigs twill twine twins twiny twirl twist twixt tying tykes typed types typos tyros udder ulcer ultra umami umbel umber umiak unbar uncle uncut under undid undue unfed unfit unify union unite units unity unjam unlit unman unmet unpin unsay unset untie until unwed unzip upend upped upper upset urban urged urges urine usage users usher using usual usurp usury uteri utero utter uvula vacant vague vales valet valid valor value valve vamps vanes vapes vapor vases vault vaunt veals veers vegan veils veins velar velds venal vends venom vents venue verbs verge verse verso verve vests vetch vexed vexes vials viand vibes vicar viced vices video viers views vigil vigor viler villa vine vines vinyl viola viper viral vireo virus visas vised vises visit visor vista vitae vital vivas vivid vixen vocal vodka vogue voice void voile volts vomit voter votes vouch vowed vowel vroom vying wacky waded wader wades wafer wafts waged wager wages wagon waifs wails waist waits waive waked waken wakes waled wales walks walls waltz wands waned wanes wants wards wares warms warns warps warts warty washy wasps waste watch water watts waved waver waves waxed waxen waxes weald weans wears weary weave webby wedge wedss weeds weedy weeks weeny weeps weepy weest wefts weigh weird welds wells welsh welts wench wends wests wetly whack whale wharf whats wheat wheel whelm whelp where whets which whiff while whims whine whiny whips whirl whirr whirs whisk whist white whits whizz whoa whole whoop whops whorl whose whoso wicks widen wider wides widow width wield wifey wight wilds wiles wills wilts wimpy wince winch winds windy wined wines winey wings winks wino winos wiped wiper wipes wired wirer wires wiry wised wiser wises wisps wispy witch witty wived wiver wives wizen woful woken wolds wolfs woman wombs women woods woody wooed wooer woofs wooly woozy words wordy works world worms wormy worry worse worst worth would wound woven wowed wrack wrans wraps wrapt wrath wreak wreck wrens wrest wried wrier wries wring wrist write writs wrong wrote wroth wrung wryer wryly yacht yahoo yamen yanks yards yarns yawns yearn years yeast yells yelps yeses yetis yield yipes yodel yogas yogic yogis yoked yokel yokes yolks young yours youth yowls yucca yucky yukky yules zaire zappy zeals zebra zebus zeros zests zesty zilch zincs zings zingy zippy zonal zoned zoner zones zooms zowie".split(/\s+/).filter(w => w.length === 5);
+
+// Dedupe
+const WORDLIST = [...new Set(WORDS)];
+
+// ---------- State ----------
+const ROWS = 6, COLS = 5;
+const STATES = ['empty', 'gray', 'yellow', 'green'];
+let grid = []; // grid[r][c] = { letter, state }
+let activeRow = 0;
+
+function initGrid() {
+  grid = Array.from({ length: ROWS }, () =>
+    Array.from({ length: COLS }, () => ({ letter: '', state: 'empty' }))
+  );
+  activeRow = 0;
+}
+
+// ---------- Rendering ----------
+const boardEl = document.getElementById('board');
+function renderBoard() {
+  boardEl.innerHTML = '';
+  for (let r = 0; r < ROWS; r++) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'row';
+    for (let c = 0; c < COLS; c++) {
+      const cell = grid[r][c];
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      if (cell.letter) tile.classList.add('filled');
+      if (cell.state !== 'empty') tile.classList.add(cell.state);
+      if (r === activeRow && cell.letter && cell.state === 'empty') tile.classList.add('active');
+      tile.textContent = cell.letter;
+      tile.addEventListener('click', () => cycleTile(r, c));
+      rowEl.appendChild(tile);
+    }
+    boardEl.appendChild(rowEl);
+  }
+}
+
+function cycleTile(r, c) {
+  if (!grid[r][c].letter) return;
+  const cur = grid[r][c].state;
+  const idx = STATES.indexOf(cur);
+  // cycle through gray -> yellow -> green -> gray (skip 'empty' once a color set)
+  const order = ['gray', 'yellow', 'green'];
+  const oi = order.indexOf(cur);
+  grid[r][c].state = oi === -1 ? 'gray' : order[(oi + 1) % order.length];
+  renderBoard();
+}
+
+// ---------- Keyboard input ----------
+function typeLetter(ch) {
+  const row = grid[activeRow];
+  for (let c = 0; c < COLS; c++) {
+    if (!row[c].letter) {
+      row[c].letter = ch.toLowerCase();
+      row[c].state = 'gray'; // default to gray when typed
+      renderBoard();
+      return;
+    }
+  }
+}
+function backspace() {
+  const row = grid[activeRow];
+  for (let c = COLS - 1; c >= 0; c--) {
+    if (row[c].letter) {
+      row[c].letter = '';
+      row[c].state = 'empty';
+      renderBoard();
+      return;
+    }
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { solve(); return; }
+  if (e.key === 'Backspace') { backspace(); return; }
+  if (/^[a-zA-Z]$/.test(e.key)) typeLetter(e.key);
+});
+
+// On-screen keyboard
+const KEYS = [
+  ['q','w','e','r','t','y','u','i','o','p'],
+  ['a','s','d','f','g','h','j','k','l'],
+  ['ent','z','x','c','v','b','n','m','del']
+];
+const kbEl = document.getElementById('keyboard');
+function renderKeyboard() {
+  kbEl.innerHTML = '';
+  // determine best known status per letter across the board
+  const status = {};
+  const rank = { gray: 1, yellow: 2, green: 3 };
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const { letter, state } = grid[r][c];
+      if (letter && state !== 'empty') {
+        if (!status[letter] || rank[state] > rank[status[letter]]) status[letter] = state;
+      }
+    }
+  KEYS.forEach(rowKeys => {
+    const krow = document.createElement('div');
+    krow.className = 'krow';
+    rowKeys.forEach(k => {
+      const key = document.createElement('button');
+      key.className = 'key';
+      if (k === 'ent' || k === 'del') {
+        key.classList.add('wide');
+        key.textContent = k === 'ent' ? 'ENTER' : '⌫';
+        key.addEventListener('click', k === 'ent' ? solve : backspace);
+      } else {
+        key.textContent = k;
+        if (status[k]) key.classList.add(status[k]);
+        key.addEventListener('click', () => typeLetter(k));
+      }
+      krow.appendChild(key);
+    });
+    kbEl.appendChild(krow);
+  });
+}
+
+// ---------- Solver ----------
+function buildConstraints() {
+  // green[pos] = letter ; required min count per letter ; banned positions for letter ; excluded letters
+  const greens = Array(COLS).fill(null);
+  const minCount = {};   // letter -> minimum occurrences
+  const exactCount = {}; // letter -> exact count when grays present with same letter
+  const bannedPos = {};  // letter -> Set of positions it cannot be (yellow)
+  const guesses = [];
+
+  for (let r = 0; r < ROWS; r++) {
+    const row = grid[r];
+    if (!row.every(c => c.letter)) continue;          // incomplete row
+    if (row.every(c => c.state === 'empty')) continue; // uncolored row
+    guesses.push(row.map(c => c.letter).join(''));
+
+    // count colored (non-gray) occurrences per letter in this row
+    const rowMin = {};
+    row.forEach(c => {
+      if (c.state === 'green' || c.state === 'yellow') rowMin[c.letter] = (rowMin[c.letter] || 0) + 1;
+    });
+    Object.entries(rowMin).forEach(([l, n]) => { minCount[l] = Math.max(minCount[l] || 0, n); });
+
+    row.forEach((c, i) => {
+      if (c.state === 'green') greens[i] = c.letter;
+      if (c.state === 'yellow') {
+        (bannedPos[c.letter] = bannedPos[c.letter] || new Set()).add(i);
+      }
+      if (c.state === 'gray') {
+        // gray means: this letter appears no more than the number of green/yellow of same letter in this row
+        if (rowMin[c.letter]) {
+          exactCount[c.letter] = rowMin[c.letter];
+        } else {
+          exactCount[c.letter] = 0;
+        }
+        // a gray also cannot sit in this position
+        (bannedPos[c.letter] = bannedPos[c.letter] || new Set()).add(i);
+      }
+    });
+  }
+  return { greens, minCount, exactCount, bannedPos, guesses };
+}
+
+function matches(word, con) {
+  const { greens, minCount, exactCount, bannedPos } = con;
+  // greens
+  for (let i = 0; i < COLS; i++) if (greens[i] && word[i] !== greens[i]) return false;
+  // count letters
+  const counts = {};
+  for (const ch of word) counts[ch] = (counts[ch] || 0) + 1;
+  // min counts (yellows/greens)
+  for (const [l, n] of Object.entries(minCount)) if ((counts[l] || 0) < n) return false;
+  // exact counts (gray-derived caps)
+  for (const [l, n] of Object.entries(exactCount)) {
+    if (n === 0) { if (counts[l]) return false; }
+    else { if ((counts[l] || 0) !== n) return false; }
+  }
+  // banned positions (yellow & gray placements)
+  for (const [l, set] of Object.entries(bannedPos)) {
+    for (const pos of set) if (word[pos] === l) return false;
+  }
+  return true;
+}
+
+function scoreWords(candidates) {
+  // letter frequency by position + overall, reward unique letters
+  const posFreq = Array.from({ length: COLS }, () => ({}));
+  const overall = {};
+  candidates.forEach(w => {
+    const seen = new Set();
+    for (let i = 0; i < COLS; i++) {
+      const ch = w[i];
+      posFreq[i][ch] = (posFreq[i][ch] || 0) + 1;
+      if (!seen.has(ch)) { overall[ch] = (overall[ch] || 0) + 1; seen.add(ch); }
+    }
+  });
+  return candidates.map(w => {
+    let score = 0;
+    const seen = new Set();
+    for (let i = 0; i < COLS; i++) {
+      const ch = w[i];
+      score += (posFreq[i][ch] || 0);
+      if (!seen.has(ch)) { score += (overall[ch] || 0); seen.add(ch); }
+    }
+    return { word: w, score };
+  }).sort((a, b) => b.score - a.score);
+}
+
+const suggEl = document.getElementById('suggestions');
+const countEl = document.getElementById('count');
+
+function solve() {
+  // commit: advance active row to the next empty row for continued play
+  const con = buildConstraints();
+  renderKeyboard();
+
+  if (con.guesses.length === 0) {
+    countEl.textContent = 'Enter at least one guess and set tile colours.';
+    suggEl.innerHTML = '<div class="empty">No guesses yet.</div>';
+    return;
+  }
+
+  const candidates = WORDLIST.filter(w => matches(w, con));
+  const ranked = scoreWords(candidates);
+
+  countEl.textContent = `${candidates.length} possible word${candidates.length === 1 ? '' : 's'} remaining.`;
+
+  if (ranked.length === 0) {
+    suggEl.innerHTML = '<div class="empty">No matches — double-check your tile colours.</div>';
+  } else {
+    suggEl.innerHTML = '';
+    ranked.slice(0, 50).forEach((r, i) => {
+      const div = document.createElement('div');
+      div.className = 'sugg' + (i === 0 ? ' best' : '');
+      const w = document.createElement('span');
+      w.className = 'word';
+      w.textContent = r.word;
+      w.title = 'Click to load into the next empty row';
+      w.addEventListener('click', () => loadWord(r.word));
+      const s = document.createElement('span');
+      s.className = 'score';
+      s.textContent = i === 0 ? 'best pick' : `#${i + 1}`;
+      div.appendChild(w);
+      div.appendChild(s);
+      suggEl.appendChild(div);
+    });
+  }
+
+  // move active row to next empty row
+  const next = grid.findIndex(row => row.every(c => !c.letter));
+  if (next !== -1) activeRow = next;
+  renderBoard();
+}
+
+function loadWord(word) {
+  // find next empty row
+  let target = grid.findIndex(row => row.every(c => !c.letter));
+  if (target === -1) target = activeRow;
+  for (let c = 0; c < COLS; c++) {
+    grid[target][c].letter = word[c];
+    grid[target][c].state = 'gray';
+  }
+  activeRow = target;
+  renderBoard();
+}
+
+// ---------- Buttons ----------
+document.getElementById('solveBtn').addEventListener('click', solve);
+document.getElementById('clearRowBtn').addEventListener('click', () => {
+  grid[activeRow] = Array.from({ length: COLS }, () => ({ letter: '', state: 'empty' }));
+  renderBoard(); renderKeyboard();
+});
+document.getElementById('resetBtn').addEventListener('click', () => {
+  initGrid(); renderBoard(); renderKeyboard();
+  countEl.textContent = 'Enter a guess to begin.';
+  suggEl.innerHTML = '<div class="empty">No guesses yet.</div>';
+});
+
+// ---------- Init ----------
+initGrid();
+renderBoard();
+renderKeyboard();
+</script>
+</body>
+</html>
