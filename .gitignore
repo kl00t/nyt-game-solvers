@@ -427,3 +427,18 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+## ---- nyt-game-solvers additions ----
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+# (the provider lock file .terraform.lock.hcl SHOULD be committed)
+!.terraform.lock.hcl
+
+# Lambda@Edge build artifacts (node_modules/ is ignored above;
+# the zip is rebuilt by CI on every run)
+infra/.build/
+*.zip
