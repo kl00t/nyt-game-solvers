@@ -1,112 +1,85 @@
 # NYT Game Solvers — Implementation Plan
 
-A step-by-step plan for hosting the **Wordle Solver** and **Connections Solver** as a secured static "games page" on AWS.
+A step-by-step plan for hosting the **Wordle Solver** and **Connections Solver** as a public "games page" — a static website served directly from an S3 bucket.
 
 | Requirement | How it's met |
 |---|---|
-| Static site hosted in S3 | Private S3 bucket served through CloudFront |
-| Publicly reachable but behind a login | CloudFront + Lambda@Edge enforcing an AWS Cognito session on **every** request |
-| Identity via AWS Cognito | Cognito User Pool with Hosted UI, invite-only accounts |
-| Source in GitHub `nyt-game-solvers` | New repository under your personal GitHub account |
+| Static site hosted in S3 | S3 bucket with static website hosting enabled, publicly readable |
+| Openly accessible on the web | Public bucket policy — no login, no restrictions |
+| Source in GitHub `nyt-game-solvers` | Repository under your personal GitHub account: `kl00t/nyt-game-solvers` |
 | CI/CD on every change | GitHub Actions: PRs are validated, merges to `main` deploy to production |
 | All infrastructure as code | Terraform (≥ 1.10), remote state in S3 |
-| Cost effective | Serverless throughout; ~£0–1/month at personal usage (see §2) |
+| Cost effective | ~£0.05/month — S3 storage and request pennies only |
 
-**Confirmed decisions:** Terraform · edge-enforced auth · invite-only users · default `*.cloudfront.net` URL (no custom domain) · primary region `eu-west-1` (Ireland) · GitHub OIDC role for CI (no stored AWS keys) · deploy on push to `main`.
+**Confirmed decisions:** Terraform · **no authentication — fully public site** · S3 website endpoint URL (no custom domain) · region `eu-west-1` (Ireland) · GitHub OIDC role for CI (no stored AWS keys) · deploy on push to `main`.
+
+> **Revision note:** an earlier version of this plan secured the site behind a Cognito login enforced by CloudFront + Lambda@Edge. That requirement has been removed — the site is now intentionally public, which eliminates Cognito, Lambda@Edge, CloudFront, and the SSM parameter entirely. If login is ever wanted again, the previous architecture is in this file's git history.
 
 ---
 
 ## 1. Architecture overview
 
-### Why not "just S3 static website hosting"?
-
-S3's static website hosting mode serves every object to anyone — it has no concept of a session or login. To put a real lock on a static site you must place **CloudFront** in front of a **private** S3 bucket and check the visitor's identity **at the edge, before the file is served**:
-
 ```
-Browser ──> CloudFront edge
-              │
-              ├─ Lambda@Edge (viewer-request): valid Cognito session cookie?
-              │     ├─ NO  ──> 302 redirect to Cognito Hosted UI login page
-              │     │            (user logs in, Cognito redirects back with a code,
-              │     │             Lambda@Edge exchanges it for JWTs, sets cookies)
-              │     └─ YES ──> continue
-              │
-              └──> S3 bucket (private; readable only by CloudFront via
-                   Origin Access Control — direct bucket URLs return 403)
+Browser ──HTTP──> S3 static website endpoint
+                  http://<bucket>.s3-website-eu-west-1.amazonaws.com
+                  (public-read bucket policy; serves index.html
+                   and the two solver pages directly)
 ```
 
-An unauthenticated user can never fetch even one byte of HTML. This is a genuine lock, unlike a JavaScript "login screen" bolted onto a public bucket (which anyone can bypass with `curl`).
+That's the whole runtime architecture. S3's static website hosting mode serves objects to anyone over HTTP with `index.html` as the default document.
 
 ### Components
 
 | Component | Region | Purpose |
 |---|---|---|
-| S3 bucket `nyt-game-solvers-site-<account-id>` | eu-west-1 | Holds `index.html` + the two solver pages. All public access blocked. |
-| CloudFront distribution | global | HTTPS entry point (`https://dxxxxxxxx.cloudfront.net`), caches content, runs the auth check. |
-| CloudFront Origin Access Control (OAC) | global | Lets *only* this distribution read the bucket. |
-| Cognito User Pool + Hosted UI domain + app client | eu-west-1 | Stores users, renders the login page, issues JWTs. Self-signup **disabled**. |
-| Lambda@Edge function (`cognito-at-edge`) | **us-east-1** (CloudFront requirement) | Viewer-request handler: validates the session, handles the OAuth code exchange, sets cookies. |
-| SSM Parameter `/nyt-game-solvers/auth-config` | us-east-1 | Runtime config for the edge function (see the note below). |
-| S3 bucket `nyt-game-solvers-tfstate-<account-id>` | eu-west-1 | Terraform remote state (native S3 locking — no DynamoDB table needed). |
+| S3 bucket `nyt-game-solvers-site-<account-id>` | eu-west-1 | Holds and serves `index.html` + the two solver pages. Website hosting enabled, public read. |
+| S3 bucket `nyt-game-solvers-tfstate-<account-id>` | eu-west-1 | Terraform remote state (native S3 locking — no DynamoDB table needed). Private. |
 | GitHub OIDC provider + IAM role `nyt-game-solvers-deploy` | global (IAM) | Lets GitHub Actions deploy with short-lived credentials — no secrets stored in GitHub. |
 
-> **Design note — why the SSM parameter?** Lambda@Edge does not support environment variables, and there is a dependency cycle if you bake config in: the Cognito app client's callback URL needs the CloudFront domain, CloudFront needs the Lambda's ARN, and the Lambda would need the app client ID. Storing the Cognito IDs in an SSM parameter that the function reads once at cold start breaks the cycle, so **a single `terraform apply` builds everything** — essential for a hands-off CI/CD pipeline.
+### Known trade-off: HTTP only
+
+S3 website endpoints **do not support HTTPS**. Visitors get a plain-HTTP URL and browsers may show "Not secure" in the address bar. For a public puzzle-helper page with no accounts and no sensitive data this is acceptable; if you later want HTTPS (or a custom domain), put CloudFront in front of the bucket — see §12. Everything else in this plan stays the same if you do.
+
+> The Connections solver's optional "Solve with Claude" feature sends the user's API key from the browser straight to `api.anthropic.com` over HTTPS — that call is encrypted regardless of the page being served over HTTP. Even so, if you expect real use of that feature, the CloudFront/HTTPS enhancement is worth doing so the page itself can't be tampered with in transit.
 
 ---
 
 ## 2. Estimated monthly cost
 
-At personal/family traffic levels (a handful of users, a few hundred page views/month):
-
 | Service | Cost |
 |---|---|
-| Cognito | Free — well under the free monthly-active-user allowance |
-| CloudFront | Free — always-free tier includes 1 TB data transfer + 10M requests/month |
-| Lambda@Edge | ~£0 — pennies per million requests; you'll use thousands |
-| S3 (site + state) | < £0.05 — a few MB of storage, minimal requests |
-| SSM Parameter Store | Free (standard parameter) |
-| **Total** | **~£0–1 / month** |
+| S3 storage (site + state) | < £0.01 — a few hundred KB |
+| S3 requests / data transfer | Pennies at personal traffic; first 100 GB/month of transfer out is free-tier |
+| IAM / OIDC | Free |
+| **Total** | **~£0–0.05 / month** |
 
-There are no fixed/hourly charges anywhere in this design — everything is pay-per-request. Add an AWS Budget alert (see §11) as a safety net.
+No fixed or hourly charges anywhere. Add an AWS Budget alert (§12) as a safety net.
 
 ---
 
 ## 3. Prerequisites
 
 1. **AWS account** with admin access for the one-time bootstrap (Step 2).
-2. **AWS CLI v2** installed and configured (`aws configure`) — used for bootstrap and user creation.
+2. **AWS CLI v2** installed and configured (`aws configure`).
 3. **Terraform ≥ 1.10** (needed for native S3 state locking).
-4. **Node.js 20+ and npm** — to install the edge function's dependency locally and in CI.
-5. **Git + a personal GitHub account.**
-6. Your **AWS account ID** (`aws sts get-caller-identity --query Account --output text`) — substitute it wherever you see `<ACCOUNT_ID>` below, and your GitHub username for `<GITHUB_USER>`.
+4. **Git + your GitHub account** (repo already exists: `kl00t/nyt-game-solvers`).
+5. Your **AWS account ID** (`aws sts get-caller-identity --query Account --output text`) — substitute wherever you see `<ACCOUNT_ID>`.
 
 ---
 
-## 4. Step 1 — Create the GitHub repository
-
-Create a repository named **`nyt-game-solvers`** under your personal account (private or public — the site's security does not depend on the repo being private, but keep it **private** if you may ever commit anything sensitive).
+## 4. Step 1 — Repository structure  ✅ (done)
 
 Repository layout:
 
 ```
 nyt-game-solvers/
 ├── site/                          # everything deployed to S3
-│   ├── index.html                 # NEW games landing page (Step 4)
-│   ├── connections-solver.html    # copied unchanged from C:\Repos
-│   └── wordle-solver.html         # copied unchanged from C:\Repos
-├── lambda/
-│   └── auth/                      # Lambda@Edge source
-│       ├── index.js
-│       ├── package.json
-│       └── package-lock.json      # commit this — CI uses `npm ci`
+│   ├── index.html                 # games landing page (Step 4)
+│   ├── connections-solver.html
+│   └── wordle-solver.html
 ├── infra/                         # main Terraform config (remote state)
 │   ├── providers.tf
-│   ├── variables.tf
 │   ├── s3.tf
-│   ├── cloudfront.tf
-│   ├── cognito.tf
-│   ├── lambda-edge.tf
-│   ├── ssm.tf
 │   ├── outputs.tf
 │   └── bootstrap/                 # one-time bootstrap config (local state)
 │       └── main.tf
@@ -114,17 +87,19 @@ nyt-game-solvers/
 │   └── workflows/
 │       ├── pr-validate.yml
 │       └── deploy.yml
-├── .gitignore                     # node_modules/, *.zip, .terraform/, *.tfstate*
+├── .gitignore                     # .terraform/, *.tfstate*, etc.
 └── README.md
 ```
 
-Set a **branch protection rule on `main`** (Settings → Branches): require a pull request and require the "Validate" status check to pass. This makes the PR-validate workflow a real gate.
+This step has been completed (the `lambda/` folder created for the earlier authenticated design is no longer needed and has been removed).
+
+**Branch protection:** after Step 5 lands, add a rule on `main` (GitHub → Settings → Branches): require a pull request and require the "Validate" status check.
 
 ---
 
 ## 5. Step 2 — One-time bootstrap (state bucket + CI role)
 
-Terraform needs an S3 bucket to store its state in, and GitHub Actions needs an IAM role to assume — but those can't be created by the pipeline that depends on them. So a **small separate Terraform config with local state** creates them once, run from your machine with your admin credentials. It is kept in the repo (`infra/bootstrap/`) for documentation and future changes.
+Terraform needs an S3 bucket for its state, and GitHub Actions needs an IAM role to assume — neither can be created by the pipeline that depends on them. A **small separate Terraform config with local state** creates them once, run from your machine with admin credentials.
 
 `infra/bootstrap/main.tf`:
 
@@ -144,7 +119,7 @@ data "aws_caller_identity" "current" {}
 
 locals {
   account_id  = data.aws_caller_identity.current.account_id
-  github_repo = "<GITHUB_USER>/nyt-game-solvers"
+  github_repo = "kl00t/nyt-game-solvers"
 }
 
 # ---- Terraform remote state bucket ----
@@ -201,40 +176,24 @@ resource "aws_iam_role" "deploy" {
   })
 }
 
+# The stack is S3-only, so the deploy role is S3-only.
 resource "aws_iam_role_policy" "deploy" {
   name = "deploy-permissions"
   role = aws_iam_role.deploy.id
 
-  # Scoped to the services this stack manages. Tighten to specific
-  # resource ARNs once the stack is stable, if desired.
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "ManageStack"
-        Effect = "Allow"
-        Action = [
-          "s3:*", "cloudfront:*", "cognito-idp:*",
-          "lambda:*", "ssm:*", "logs:*"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "ManageLambdaEdgeRole"
-        Effect = "Allow"
-        Action = ["iam:*"]
-        Resource = [
-          "arn:aws:iam::${local.account_id}:role/nyt-game-solvers-*",
-          "arn:aws:iam::${local.account_id}:policy/nyt-game-solvers-*"
-        ]
-      },
-      {
-        Sid      = "ReadOnlyIam"
-        Effect   = "Allow"
-        Action   = ["iam:GetRole", "iam:ListRoles", "iam:GetOpenIDConnectProvider"]
-        Resource = "*"
-      }
-    ]
+    Statement = [{
+      Sid    = "ManageSiteAndState"
+      Effect = "Allow"
+      Action = ["s3:*"]
+      Resource = [
+        aws_s3_bucket.tfstate.arn,
+        "${aws_s3_bucket.tfstate.arn}/*",
+        "arn:aws:s3:::nyt-game-solvers-site-${local.account_id}",
+        "arn:aws:s3:::nyt-game-solvers-site-${local.account_id}/*"
+      ]
+    }]
   })
 }
 
@@ -250,11 +209,13 @@ terraform init
 terraform apply
 ```
 
-Note the `deploy_role_arn` output — it goes into both workflow files. Commit the bootstrap config; add `infra/bootstrap/terraform.tfstate*` to `.gitignore` (or migrate its state into the new bucket later).
+Note the `deploy_role_arn` output — it goes into both workflow files. The local bootstrap state files are already covered by the `*.tfstate*` rule in `.gitignore`.
+
+> **Account-level check:** in the S3 console → *Block Public Access settings for this account*, make sure account-wide blocking is **off** (bucket-level settings are managed by Terraform), otherwise the public bucket policy in Step 3 will be rejected no matter what Terraform does.
 
 ---
 
-## 6. Step 3 — Core Terraform (the whole stack, one apply)
+## 6. Step 3 — Core Terraform (the public website bucket)
 
 ### 6.1 `infra/providers.tf`
 
@@ -262,8 +223,7 @@ Note the `deploy_role_arn` output — it goes into both workflow files. Commit t
 terraform {
   required_version = ">= 1.10"
   required_providers {
-    aws     = { source = "hashicorp/aws", version = "~> 5.80" }
-    archive = { source = "hashicorp/archive", version = "~> 2.6" }
+    aws = { source = "hashicorp/aws", version = "~> 5.80" }
   }
 
   backend "s3" {
@@ -279,13 +239,6 @@ provider "aws" {
   region = "eu-west-1"
 }
 
-# Lambda@Edge, its IAM/SSM config, and anything CloudFront-attached
-# must live in us-east-1.
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-}
-
 data "aws_caller_identity" "current" {}
 
 locals {
@@ -294,300 +247,66 @@ locals {
 }
 ```
 
-### 6.2 `infra/s3.tf` — private site bucket
+### 6.2 `infra/s3.tf` — public static website bucket
 
 ```hcl
 resource "aws_s3_bucket" "site" {
   bucket = "${local.name}-site-${local.account_id}"
 }
 
+resource "aws_s3_bucket_website_configuration" "site" {
+  bucket = aws_s3_bucket.site.id
+
+  index_document { suffix = "index.html" }
+  error_document { key = "index.html" } # fall back to the games page
+}
+
+# Public website: bucket-level blocking must be off so the
+# public-read policy below can attach.
 resource "aws_s3_bucket_public_access_block" "site" {
   bucket                  = aws_s3_bucket.site.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
 }
 
-# Only this CloudFront distribution may read objects.
 resource "aws_s3_bucket_policy" "site" {
   bucket = aws_s3_bucket.site.id
+
+  # The policy must attach *after* the public-access block is relaxed.
+  depends_on = [aws_s3_bucket_public_access_block.site]
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid       = "AllowCloudFrontOAC"
+      Sid       = "PublicReadGetObject"
       Effect    = "Allow"
-      Principal = { Service = "cloudfront.amazonaws.com" }
+      Principal = "*"
       Action    = "s3:GetObject"
       Resource  = "${aws_s3_bucket.site.arn}/*"
-      Condition = {
-        StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.site.arn }
-      }
     }]
   })
 }
 ```
 
-### 6.3 `infra/cognito.tf` — user pool, hosted UI, app client
-
-```hcl
-resource "aws_cognito_user_pool" "users" {
-  name = local.name
-
-  # Invite-only: nobody can self-register.
-  admin_create_user_config {
-    allow_admin_create_user_only = true
-  }
-
-  username_attributes      = ["email"]
-  auto_verified_attributes = ["email"]
-
-  password_policy {
-    minimum_length    = 12
-    require_lowercase = true
-    require_uppercase = true
-    require_numbers   = true
-    require_symbols   = false
-  }
-
-  account_recovery_setting {
-    recovery_mechanism {
-      name     = "verified_email"
-      priority = 1
-    }
-  }
-}
-
-# Hosted UI login page lives at:
-#   https://<domain>.auth.eu-west-1.amazoncognito.com
-# The prefix must be globally unique — adjust if taken.
-resource "aws_cognito_user_pool_domain" "users" {
-  domain       = "${local.name}-${local.account_id}"
-  user_pool_id = aws_cognito_user_pool.users.id
-}
-
-resource "aws_cognito_user_pool_client" "site" {
-  name         = "${local.name}-site"
-  user_pool_id = aws_cognito_user_pool.users.id
-
-  generate_secret                      = false
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "email"]
-  supported_identity_providers         = ["COGNITO"]
-  prevent_user_existence_errors        = "ENABLED"
-
-  callback_urls = ["https://${aws_cloudfront_distribution.site.domain_name}"]
-  logout_urls   = ["https://${aws_cloudfront_distribution.site.domain_name}"]
-
-  access_token_validity  = 1   # hours
-  id_token_validity      = 1
-  refresh_token_validity = 30  # days
-}
-```
-
-### 6.4 `infra/lambda-edge.tf` — the auth function
-
-```hcl
-# CI runs `npm ci` in lambda/auth before terraform, so node_modules
-# is present when this zip is built.
-data "archive_file" "auth" {
-  type        = "zip"
-  source_dir  = "${path.module}/../lambda/auth"
-  output_path = "${path.module}/.build/auth.zip"
-}
-
-resource "aws_iam_role" "auth_lambda" {
-  name = "${local.name}-auth-edge"
-
-  # Lambda@Edge requires BOTH principals.
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = ["lambda.amazonaws.com", "edgelambda.amazonaws.com"] }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "auth_lambda" {
-  name = "auth-edge-permissions"
-  role = aws_iam_role.auth_lambda.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        # Replicated functions log in whichever region serves the viewer.
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "arn:aws:logs:*:${local.account_id}:*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = aws_ssm_parameter.auth_config.arn
-      }
-    ]
-  })
-}
-
-resource "aws_lambda_function" "auth" {
-  provider = aws.us_east_1
-
-  function_name    = "${local.name}-auth"
-  role             = aws_iam_role.auth_lambda.arn
-  runtime          = "nodejs20.x"
-  handler          = "index.handler"
-  filename         = data.archive_file.auth.output_path
-  source_code_hash = data.archive_file.auth.output_base64sha256
-
-  publish     = true  # Lambda@Edge attaches a *version*, not $LATEST
-  memory_size = 128   # viewer-request maximums
-  timeout     = 5
-}
-```
-
-### 6.5 `infra/ssm.tf` — runtime config for the edge function
-
-```hcl
-resource "aws_ssm_parameter" "auth_config" {
-  provider = aws.us_east_1
-
-  name = "/${local.name}/auth-config"
-  type = "String"
-  value = jsonencode({
-    region         = "eu-west-1"
-    userPoolId     = aws_cognito_user_pool.users.id
-    userPoolAppId  = aws_cognito_user_pool_client.site.id
-    userPoolDomain = "${aws_cognito_user_pool_domain.users.domain}.auth.eu-west-1.amazoncognito.com"
-  })
-}
-```
-
-### 6.6 `infra/cloudfront.tf` — distribution + OAC + auth hook
-
-```hcl
-resource "aws_cloudfront_origin_access_control" "site" {
-  name                              = local.name
-  origin_access_control_origin_type = "s3"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
-
-# AWS managed cache policy: "CachingOptimized"
-data "aws_cloudfront_cache_policy" "caching_optimized" {
-  name = "Managed-CachingOptimized"
-}
-
-resource "aws_cloudfront_distribution" "site" {
-  enabled             = true
-  comment             = local.name
-  default_root_object = "index.html"
-  price_class         = "PriceClass_100" # EU + North America edges only — cheapest
-
-  origin {
-    origin_id                = "s3-site"
-    domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
-    origin_access_control_id = aws_cloudfront_origin_access_control.site.id
-  }
-
-  default_cache_behavior {
-    target_origin_id       = "s3-site"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
-    compress               = true
-
-    # The lock on the door: every request is authenticated first.
-    lambda_function_association {
-      event_type   = "viewer-request"
-      lambda_arn   = aws_lambda_function.auth.qualified_arn
-      include_body = false
-    }
-  }
-
-  restrictions {
-    geo_restriction { restriction_type = "none" }
-  }
-
-  viewer_certificate {
-    cloudfront_default_certificate = true
-  }
-}
-```
-
-### 6.7 `infra/outputs.tf`
+### 6.3 `infra/outputs.tf`
 
 ```hcl
 output "site_url" {
-  value = "https://${aws_cloudfront_distribution.site.domain_name}"
+  value = "http://${aws_s3_bucket_website_configuration.site.website_endpoint}"
 }
 output "site_bucket" {
   value = aws_s3_bucket.site.bucket
 }
-output "distribution_id" {
-  value = aws_cloudfront_distribution.site.id
-}
-output "user_pool_id" {
-  value = aws_cognito_user_pool.users.id
-}
 ```
-
-### 6.8 The edge function code
-
-`lambda/auth/package.json`:
-
-```json
-{
-  "name": "nyt-game-solvers-auth",
-  "private": true,
-  "dependencies": {
-    "cognito-at-edge": "^1.5.2"
-  }
-}
-```
-
-`lambda/auth/index.js`:
-
-```js
-// Lambda@Edge viewer-request handler.
-// Config is read from SSM at cold start (Lambda@Edge has no env vars);
-// the AWS SDK v3 SSM client is built into the nodejs20.x runtime.
-const { Authenticator } = require('cognito-at-edge');
-const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
-
-let authenticator;
-
-exports.handler = async (event) => {
-  if (!authenticator) {
-    const ssm = new SSMClient({ region: 'us-east-1' });
-    const { Parameter } = await ssm.send(
-      new GetParameterCommand({ Name: '/nyt-game-solvers/auth-config' })
-    );
-    const cfg = JSON.parse(Parameter.Value);
-    authenticator = new Authenticator({
-      region: cfg.region,
-      userPoolId: cfg.userPoolId,
-      userPoolAppId: cfg.userPoolAppId,
-      userPoolDomain: cfg.userPoolDomain,
-      cookieExpirationDays: 7,
-      logLevel: 'warn',
-    });
-  }
-  return authenticator.handle(event);
-};
-```
-
-Run `npm install` once locally in `lambda/auth/` and commit the generated `package-lock.json` (CI depends on it). `node_modules/` stays git-ignored — it is rebuilt by `npm ci` in the pipeline before Terraform zips the directory.
 
 ---
 
 ## 7. Step 4 — Site content
 
-1. Copy `connections-solver.html` and `wordle-solver.html` from `C:\Repos` into `site/` **unchanged**. (The Connections solver's optional "Solve with Claude" feature calls the Anthropic API directly from the browser with a user-supplied key — it keeps working exactly as-is behind the login; no backend required.)
-2. Create `site/index.html` — the games landing page. Keep it in the same self-contained single-file style as the solvers: a title, and one card per game linking to the solver page, with light/dark support via `prefers-color-scheme`. Skeleton:
+1. `site/connections-solver.html` and `site/wordle-solver.html` are already in place, unchanged. (The Connections solver's optional "Solve with Claude" feature calls the Anthropic API directly from the browser with a user-supplied key — no backend required.)
+2. Fill in `site/index.html` — the games landing page. Keep it in the same self-contained single-file style as the solvers: a title and one card per game, with light/dark support via `prefers-color-scheme`. Skeleton:
 
 ```html
 <!DOCTYPE html>
@@ -664,14 +383,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install edge function dependencies
-        working-directory: lambda/auth
-        run: npm ci
-
       - uses: hashicorp/setup-terraform@v3
 
       - uses: aws-actions/configure-aws-credentials@v4
@@ -695,8 +406,6 @@ jobs:
         working-directory: infra
         run: terraform plan -input=false -no-color
 ```
-
-*(Optional polish: pipe the plan into a PR comment with `borchero/terraform-plan-comment` or similar.)*
 
 ### 8.2 `.github/workflows/deploy.yml`
 
@@ -726,14 +435,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install edge function dependencies
-        working-directory: lambda/auth
-        run: npm ci
-
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false   # so `terraform output -raw` works cleanly
@@ -756,58 +457,41 @@ jobs:
         working-directory: infra
         run: |
           echo "bucket=$(terraform output -raw site_bucket)" >> "$GITHUB_OUTPUT"
-          echo "dist_id=$(terraform output -raw distribution_id)" >> "$GITHUB_OUTPUT"
           echo "url=$(terraform output -raw site_url)" >> "$GITHUB_OUTPUT"
 
       - name: Sync site content to S3
         run: aws s3 sync site/ "s3://${{ steps.tf.outputs.bucket }}" --delete
 
-      - name: Invalidate CloudFront cache
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id "${{ steps.tf.outputs.dist_id }}" \
-            --paths "/*"
-
       - name: Site URL
         run: echo "Deployed to ${{ steps.tf.outputs.url }}"
 ```
 
-*(CloudFront includes 1,000 free invalidation paths/month — `"/*"` counts as one path, so this costs nothing at this cadence.)*
+No cache invalidation step is needed — with no CDN in front, S3 serves the newly synced files immediately.
 
 ---
 
-## 9. Step 6 — First deployment & creating users
+## 9. Step 6 — First deployment
 
-1. Commit everything and push to `main` (or open a PR first to exercise the validate workflow). The deploy workflow will:
-   - build the Lambda zip, `terraform apply` the whole stack (first CloudFront + Lambda@Edge creation takes **5–15 minutes** — normal),
-   - sync `site/` to the bucket and invalidate the cache.
-2. Get the site URL from the workflow's final step (or `terraform output site_url` locally).
-3. **Create your users** (invite-only, so this is the only way in). Per user:
+1. Commit everything and push to `main` (or open a PR first to exercise the validate workflow). The deploy workflow will `terraform apply` the bucket and sync `site/` into it — the whole run takes under a minute.
+2. Get the site URL from the workflow's final step, or locally:
 
    ```powershell
-   aws cognito-idp admin-create-user `
-     --region eu-west-1 `
-     --user-pool-id <user_pool_id output> `
-     --username someone@example.com `
-     --user-attributes Name=email,Value=someone@example.com Name=email_verified,Value=true
+   cd infra
+   terraform output site_url
+   # http://nyt-game-solvers-site-<account-id>.s3-website-eu-west-1.amazonaws.com
    ```
-
-   Cognito emails them a temporary password. On first visit they log in at the Hosted UI and are forced to set a permanent password. (You can also do this in the AWS Console: Cognito → your pool → Users → *Create user*.)
+3. Open it in a browser — the games page should load for anyone, no login.
 
 ---
 
 ## 10. Step 7 — Verification checklist
 
-Work through all of these before calling it done:
-
-- [ ] **Anonymous visit** — open the CloudFront URL in a private/incognito window: you are redirected to the Cognito Hosted UI login page, and **no game content is visible**.
-- [ ] **Deep link protection** — `curl -I https://<dist>.cloudfront.net/wordle-solver.html` (no cookies) returns a `302` to Cognito, **not** `200` with content.
-- [ ] **Bucket is sealed** — `https://<bucket>.s3.eu-west-1.amazonaws.com/index.html` returns `403 Access Denied`.
-- [ ] **Login works** — sign in with a created user; you land back on the games page; both solvers load and function (localStorage persistence, tile interactions, keyboard).
-- [ ] **Session persists** — close and reopen the browser within the cookie lifetime; no re-login needed.
-- [ ] **Wrong password / unknown user is rejected** at the Hosted UI.
-- [ ] **CI gate** — open a PR with a trivial change: the Validate workflow runs `fmt`/`validate`/`plan` and blocks merging until green.
-- [ ] **CD** — merge the PR: the Deploy workflow applies, syncs, invalidates; the change is live at the URL within a minute or two of the workflow finishing.
+- [ ] **Site loads publicly** — the website endpoint URL opens the games landing page in any browser, no credentials.
+- [ ] **Both solvers work** — tiles, keyboard input, localStorage persistence, and (optionally) the Connections AI assist.
+- [ ] **Default document** — visiting the bare URL (no `/index.html`) serves the landing page.
+- [ ] **State bucket is private** — `https://nyt-game-solvers-tfstate-<account-id>.s3.eu-west-1.amazonaws.com/prod/terraform.tfstate` returns `403 Access Denied`.
+- [ ] **CI gate** — open a PR with a trivial change: the Validate workflow runs `fmt`/`validate`/`plan` and blocks merging until green (once branch protection is on).
+- [ ] **CD** — merge the PR: the Deploy workflow applies and syncs; the change is live at the URL as soon as the workflow finishes.
 - [ ] **No secrets in GitHub** — repo Settings → Secrets shows no AWS keys (OIDC only).
 
 ---
@@ -815,15 +499,13 @@ Work through all of these before calling it done:
 ## 11. Ongoing operations
 
 - **Add a game:** drop the new HTML file in `site/`, add a card to `index.html`, open a PR, merge. Nothing else.
-- **Add / remove users:** `admin-create-user` (above) / `aws cognito-idp admin-delete-user`, or the Cognito console. No deploy needed.
-- **Sign out:** cognito-at-edge supports a logout route — add `logoutConfiguration: { logoutUri: '/signout', logoutRedirectUri: 'https://<dist>.cloudfront.net' }` to the `Authenticator` options (values via the SSM parameter) and link "Sign out" to `/signout` from `index.html` if wanted.
 - **Rotate nothing:** there are no long-lived credentials anywhere in this design.
-- **Teardown:** `terraform destroy` in `infra/`, then the bootstrap config. **Caveat:** Lambda@Edge replicas take from ~30 minutes up to a few hours to drain after the CloudFront association is removed — if destroy fails on the Lambda function, simply re-run it later.
+- **Teardown:** empty the site bucket (`aws s3 rm s3://<bucket> --recursive`), `terraform destroy` in `infra/`, then the bootstrap config.
 
 ## 12. Future enhancements (optional, all IaC-able)
 
-- **Custom domain** — Route 53 + free ACM certificate (cert must be in us-east-1 for CloudFront); update Cognito callback URLs.
+- **HTTPS + caching** — put CloudFront (with Origin Access Control and the free default certificate) in front of the bucket. This is the first thing to add if the site gets real traffic or you want the padlock. The bucket can then be made private again.
+- **Custom domain** — Route 53 + free ACM certificate (requires the CloudFront enhancement; certs for CloudFront live in us-east-1).
 - **AWS Budget alarm** — e.g. alert at £5/month as a cost tripwire.
-- **Staging environment** — second Terraform workspace/state key + a `develop` branch workflow.
-- **WAF on CloudFront** — rate limiting / geo rules (adds ~$6+/month, likely unnecessary behind auth).
-- **Terraform module split** — refactor into modules if the stack grows beyond this single site.
+- **Re-adding a login later** — the previous revision of this plan (in git history) documents the full CloudFront + Lambda@Edge + Cognito architecture.
+- **Staging environment** — second Terraform state key + a `develop` branch workflow.
