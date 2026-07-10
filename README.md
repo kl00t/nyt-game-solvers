@@ -1,37 +1,44 @@
 # nyt-game-solvers
 
-New York Times puzzle game solvers (Wordle, Connections), hosted as a public
-static website on AWS S3.
+Game Hub — a public static website of small browser games (Wordle and
+Connections solvers, Tic Tac Toe, Top-Down Shooter), served from AWS S3.
 
-**Architecture:** a publicly readable S3 bucket with static website hosting —
-no login, no CDN, nothing else. All infrastructure is Terraform; deployments
-run through GitHub Actions using an OIDC role (no stored AWS keys).
+This repo holds the **site content only**. All AWS infrastructure lives in
+[nyt-game-solvers-infra](https://github.com/kl00t/nyt-game-solvers-infra)
+(Terraform). Deployments run through GitHub Actions using an OIDC role that
+can only sync files to the site bucket — no stored AWS keys, no
+infrastructure permissions.
 
-See [nyt-game-solvers-plan.md](nyt-game-solvers-plan.md) for the full
-step-by-step implementation plan.
+See [nyt-game-solvers-plan.md](nyt-game-solvers-plan.md) for the original
+implementation plan.
 
 ## Repository layout
 
 ```
 ├── site/                       # everything deployed to S3
-│   ├── index.html              # games landing page
+│   ├── index.html              # Game Hub landing page
 │   ├── connections-solver.html
-│   └── wordle-solver.html
-├── infra/                      # main Terraform config (remote state in S3)
-│   └── bootstrap/              # one-time bootstrap: state bucket + CI role
-└── .github/
-    └── workflows/              # pr-validate.yml (PRs), deploy.yml (main)
+│   ├── wordle-solver.html
+│   ├── tictactoe.html
+│   └── shooter.html
+├── tests/                      # browser-run test suites (not deployed)
+└── .github/workflows/
+    └── deploy.yml              # main: sync site/ to the S3 bucket
 ```
 
 ## Workflow
 
-- Open a pull request → the **Validate** workflow runs `terraform fmt`,
-  `validate`, and `plan`.
-- Merge to `main` → the **Deploy** workflow applies the Terraform and syncs
-  `site/` to S3.
+Push (or merge) a change under `site/**` to `main` → the **Deploy** workflow
+syncs `site/` to the bucket and the change is live within a minute at
+http://nyt-game-solvers-site-159820161626.s3-website-eu-west-1.amazonaws.com
 
 ## Adding a game
 
 1. Drop the new self-contained HTML file into `site/`.
 2. Add a card linking to it in `site/index.html`.
 3. Open a PR and merge — the pipeline does the rest.
+
+## Running tests
+
+Open the files in `tests/` directly in a browser — each is a self-contained
+test page.

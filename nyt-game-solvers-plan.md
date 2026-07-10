@@ -15,6 +15,8 @@ A step-by-step plan for hosting the **Wordle Solver** and **Connections Solver**
 
 > **Revision note:** an earlier version of this plan secured the site behind a Cognito login enforced by CloudFront + Lambda@Edge. That requirement has been removed — the site is now intentionally public, which eliminates Cognito, Lambda@Edge, CloudFront, and the SSM parameter entirely. If login is ever wanted again, the previous architecture is in this file's git history.
 
+> **Revision note 2 (post-implementation):** the Terraform described in Steps 2, 3 and the infra half of Step 5 has since been **split into its own repository**, [nyt-game-solvers-infra](https://github.com/kl00t/nyt-game-solvers-infra), with two separate OIDC roles: `nyt-game-solvers-infra-deploy` (infra repo, manages the buckets via Terraform) and `nyt-game-solvers-deploy` (this repo, can only sync objects into the site bucket). This repo now contains site content only, and its Deploy workflow just runs `aws s3 sync`. The sections below document the original single-repo implementation.
+
 ---
 
 ## 1. Architecture overview

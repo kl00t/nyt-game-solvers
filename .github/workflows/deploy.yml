@@ -3,19 +3,20 @@ name: Deploy
 on:
   push:
     branches: [main]
+    paths: ["site/**"]
 
 permissions:
   id-token: write # OIDC token for AWS
   contents: read
 
-# Never run two production deploys at once; queue instead.
+# Never run two deploys at once; queue instead.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 env:
   AWS_REGION: eu-west-1
-  TF_IN_AUTOMATION: "true"
+  SITE_BUCKET: nyt-game-solvers-site-159820161626
 
 jobs:
   deploy:
@@ -23,32 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_wrapper: false # so `terraform output -raw` works cleanly
-
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::159820161626:role/nyt-game-solvers-deploy
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform init
-        working-directory: infra
-        run: terraform init -input=false
-
-      - name: Terraform apply (infrastructure)
-        working-directory: infra
-        run: terraform apply -input=false -auto-approve
-
-      - name: Read Terraform outputs
-        id: tf
-        working-directory: infra
-        run: |
-          echo "bucket=$(terraform output -raw site_bucket)" >> "$GITHUB_OUTPUT"
-          echo "url=$(terraform output -raw site_url)" >> "$GITHUB_OUTPUT"
-
       - name: Sync site content to S3
-        run: aws s3 sync site/ "s3://${{ steps.tf.outputs.bucket }}" --delete
+        run: aws s3 sync site/ "s3://${{ env.SITE_BUCKET }}" --delete
 
       - name: Site URL
-        run: echo "Deployed to ${{ steps.tf.outputs.url }}"
+        run: echo "Deployed to http://${{ env.SITE_BUCKET }}.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
